@@ -47,16 +47,17 @@ import {
 // ██  CONFIG — FILL THESE IN  ██
 // ════════════════════════════════════════════════════════════════════════════════
 
-const FIREBASE_CONFIG = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId:             "YOUR_APP_ID",
-};
 
-const PAYSTACK_PUBLIC_KEY = "YOUR_PAYSTACK_PUBLIC_KEY"; // e.g. "pk_live_xxx" or "pk_test_xxx"
+firebase.initializeApp({
+  apiKey:"AIzaSyCgaYVSaKtXAQOVRTRfAGV6cWjPqG9x4Tc",
+  authDomain:"trisend-e7250.firebaseapp.com",
+  projectId:"trisend-e7250",
+  storageBucket:"trisend-e7250.firebasestorage.app",
+  messagingSenderId:"1088068014414",
+  appId:"1:1088068014414:web:77c1f5c1de544b6ab5ce1f"
+});
+const auth=firebase.auth(), db=firebase.firestore();
+const PAYSTACK_PK='pk_live_795c60d1769a1ebef31e9705886a91f84de3144d';
 
 // The base URL of your server (where server.js is running).
 // In production this is just "" (same origin).
