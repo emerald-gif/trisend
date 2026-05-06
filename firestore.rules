@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Short Links ───────────────────────────────────────────────────────────
+    // Public read needed for server-side redirect fallback (no Admin SDK)
+    match /shortlinks/{code} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+
+      // Clicks subcollection — server writes via Admin SDK
+      match /clicks/{clickId} {
+        allow read: if request.auth != null
+          && get(/databases/$(database)/documents/shortlinks/$(code)).data.userId == request.auth.uid;
+        allow write: if false; // Admin SDK only
+      }
+    }
+
+    // ── Dynamic QR Codes ──────────────────────────────────────────────────────
+    // Public read needed for server-side redirect fallback
+    match /dynamicqr/{code} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.plan == 'premium';
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Static QR Codes ───────────────────────────────────────────────────────
+    match /qrcodes/{qrId} {
+      allow read, write: if request.auth != null
+        && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    // ── Notifications ─────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read: if request.auth != null;
+      allow write: if false; // Admin only
+    }
+
+    // ── User Read Receipts ────────────────────────────────────────────────────
+    match /user_reads/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── Bio Pages ─────────────────────────────────────────────────────────────────
+    match /biopages/{username} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.plan == 'premium';
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Bug Reports ───────────────────────────────────────────────────────────
+    match /bugs/{bugId} {
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow read: if false; // Admin only
+      allow update, delete: if false;
+    }
+  }
+}
