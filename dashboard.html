@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Dashboard · Trisend</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
+<script src="https://js.paystack.co/v1/inline.js"></script>
+<style>
+:root{
+  --bg:#F8FAFC;--bg2:#fff;--bg3:#F1F5F9;--bg4:#E2E8F0;
+  --bdr:#E2E8F0;--bdr2:#CBD5E1;
+  --or:#F97316;--orl:#FFF7ED;
+  --blue:#3B82F6;--bl:#EFF6FF;
+  --green:#10B981;--gl:#ECFDF5;
+  --red:#EF4444;--rl:#FEF2F2;
+  --text:#0F172A;--text2:#64748B;--text3:#94A3B8;
+  --grad:linear-gradient(135deg,#F97316 0%,#EF4444 100%);
+  --sh:0 1px 4px rgba(0,0,0,.06);
+  --shm:0 4px 20px rgba(0,0,0,.08);
+  --sidebar:256px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased;}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:4px;}
+.hidden{display:none!important;}
+
+/* ── Load gate ── */
+#loadGate{position:fixed;inset:0;background:var(--bg2);display:flex;align-items:center;justify-content:center;z-index:9999;transition:opacity .3s;}
+.lg-inner{display:flex;flex-direction:column;align-items:center;gap:16px;}
+.lg-mark{width:52px;height:52px;border-radius:14px;background:var(--grad);display:flex;align-items:center;justify-content:center;animation:lgPulse 1.5s ease-in-out infinite;}
+@keyframes lgPulse{0%,100%{transform:scale(1);}50%{transform:scale(.91);opacity:.75;}}
+.lg-name{font-size:17px;font-weight:800;color:var(--text);letter-spacing:-.4px;}
+.lg-dots{display:flex;gap:5px;}
+.lg-dot{width:6px;height:6px;border-radius:50%;background:var(--or);animation:lgD 1.4s ease-in-out infinite;}
+.lg-dot:nth-child(2){animation-delay:.2s;}
+.lg-dot:nth-child(3){animation-delay:.4s;}
+@keyframes lgD{0%,80%,100%{transform:scale(.5);opacity:.3;}40%{transform:scale(1);opacity:1;}}
+
+/* ── Toast ── */
+#tw{position:fixed;top:18px;right:18px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;max-width:320px;}
+.t{padding:12px 16px;border-radius:10px;font-size:13px;font-weight:500;display:flex;align-items:flex-start;gap:10px;pointer-events:all;animation:tIn .22s ease;box-shadow:var(--shm);border:1.5px solid;line-height:1.45;}
+.t.ok{background:#ECFDF5;border-color:#A7F3D0;color:#065F46;}
+.t.err{background:#FEF2F2;border-color:#FECACA;color:#991B1B;}
+.t.inf{background:#EFF6FF;border-color:#BFDBFE;color:#1E40AF;}
+@keyframes tIn{from{opacity:0;transform:translateX(14px);}to{opacity:1;transform:translateX(0);}}
+
+/* ── Layout ── */
+#app{display:flex;min-height:100vh;}
+.soverlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:49;backdrop-filter:blur(2px);}
+.soverlay.show{display:block;}
+
+/* ── Sidebar ── */
+.sidebar{width:var(--sidebar);min-height:100vh;background:var(--bg2);border-right:1.5px solid var(--bdr);display:flex;flex-direction:column;position:fixed;top:0;left:0;z-index:50;transition:transform .28s cubic-bezier(.4,0,.2,1);}
+.s-head{padding:14px 16px;border-bottom:1.5px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;}
+.logo{display:flex;align-items:center;gap:9px;font-size:18px;font-weight:900;letter-spacing:-.4px;color:var(--text);text-decoration:none;}
+.lmark{width:34px;height:34px;border-radius:9px;background:var(--grad);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.sclose{display:none;background:var(--bg3);border:none;width:28px;height:28px;border-radius:7px;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);}
+.s-user{padding:12px 16px;border-bottom:1.5px solid var(--bdr);}
+.s-urow{display:flex;align-items:center;gap:10px;}
+.av{width:38px;height:38px;border-radius:50%;background:var(--grad);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#fff;flex-shrink:0;overflow:hidden;}
+.av img{width:100%;height:100%;object-fit:cover;}
+.u-info{min-width:0;flex:1;}
+.u-name{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.u-email{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;}
+.ppill{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:2px 8px;border-radius:50px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;}
+.ppill.free{background:var(--bg3);color:var(--text3);}
+.ppill.premium{background:var(--grad);color:#fff;}
+.s-nav{flex:1;padding:8px;overflow-y:auto;}
+.s-sep{height:1px;background:var(--bdr);margin:5px 2px;}
+.slbl{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text3);padding:6px 8px 4px;}
+.ni{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;color:var(--text2);cursor:pointer;font-size:13px;font-weight:500;transition:.15s;margin-bottom:1px;user-select:none;}
+.ni:hover{background:var(--bg3);color:var(--text);}
+.ni.active{background:var(--orl);color:var(--or);font-weight:700;}
+.ni-ic{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.nbadge{margin-left:auto;background:var(--or);color:#fff;font-size:9px;font-weight:800;padding:2px 6px;border-radius:50px;min-width:18px;text-align:center;}
+.s-bot{padding:8px;border-top:1.5px solid var(--bdr);}
+
+/* ── Main ── */
+.dash-main{margin-left:var(--sidebar);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+.topbar{position:sticky;top:0;z-index:40;height:56px;padding:0 22px;background:rgba(255,255,255,.96);backdrop-filter:blur(20px);border-bottom:1.5px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;}
+.tb-l{display:flex;align-items:center;gap:10px;}
+.hmbg{display:none;background:var(--bg3);border:none;width:34px;height:34px;border-radius:8px;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);}
+.tb-title{font-size:15px;font-weight:800;letter-spacing:-.2px;}
+.tb-r{display:flex;align-items:center;gap:8px;}
+.notif-btn{position:relative;width:36px;height:36px;background:var(--bg3);border:1.5px solid var(--bdr);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text2);transition:.15s;}
+.notif-btn:hover{background:var(--bdr);}
+.ndot{position:absolute;top:6px;right:6px;width:8px;height:8px;background:var(--or);border-radius:50%;border:2px solid var(--bg2);}
+.d-content{flex:1;padding:22px;max-width:1200px;width:100%;}
+
+/* ── Panels ── */
+.panel{display:none;animation:fUp .2s ease;}
+.panel.active{display:block;}
+@keyframes fUp{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:translateY(0);}}
+
+/* ── Components ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 17px;border-radius:8px;border:none;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:13px;transition:all .18s;white-space:nowrap;text-decoration:none;}
+.btn:disabled{opacity:.5;cursor:not-allowed;}
+.bp{background:var(--grad);color:#fff;box-shadow:0 2px 8px rgba(249,115,22,.25);}
+.bp:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 16px rgba(249,115,22,.4);}
+.bg{background:transparent;color:var(--text2);border:1.5px solid var(--bdr2);}
+.bg:hover:not(:disabled){background:var(--bg3);color:var(--text);}
+.bsr{background:var(--rl);color:var(--red);border:1.5px solid rgba(239,68,68,.2);}
+.bsg{background:var(--gl);color:var(--green);border:1.5px solid rgba(16,185,129,.2);}
+.bsb{background:var(--bl);color:var(--blue);border:1.5px solid rgba(59,130,246,.2);}
+.bsm{padding:6px 12px;font-size:12px;}
+.blg{padding:13px 24px;font-size:15px;}
+.bfull{width:100%;}
+.fg{margin-bottom:14px;}
+.flbl{display:block;font-size:11.5px;font-weight:700;color:var(--text2);margin-bottom:6px;letter-spacing:.3px;text-transform:uppercase;}
+.fi{width:100%;padding:10px 13px;background:var(--bg3);border:1.5px solid var(--bdr);border-radius:8px;color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;outline:none;transition:.18s;}
+.fi:focus{border-color:var(--or);background:var(--bg2);box-shadow:0 0 0 3px rgba(249,115,22,.1);}
+.fi::placeholder{color:var(--text3);}
+.fi:disabled{opacity:.55;cursor:not-allowed;}
+select.fi,textarea.fi{cursor:pointer;}
+textarea.fi{resize:vertical;min-height:80px;}
+.frow{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.card{background:var(--bg2);border:1.5px solid var(--bdr);border-radius:12px;padding:20px;box-shadow:var(--sh);}
+.ctitle{font-size:14.5px;font-weight:800;color:var(--text);}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:50px;font-size:11px;font-weight:700;}
+.bo{background:var(--orl);color:var(--or);}
+.bg_{background:var(--gl);color:var(--green);}
+.br{background:var(--rl);color:var(--red);}
+.bs{background:var(--bg3);color:var(--text3);}
+.sec-lbl{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text3);margin-bottom:8px;}
+.twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.empty-s{text-align:center;padding:40px 20px;color:var(--text3);}
+.empty-s p{font-size:13px;margin-top:8px;line-height:1.5;}
+
+/* ── Stat cards ── */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:22px;}
+.sc{background:var(--bg2);border:1.5px solid var(--bdr);border-radius:12px;padding:16px;box-shadow:var(--sh);transition:.2s;}
+.sc:hover{transform:translateY(-2px);box-shadow:var(--shm);}
+.sc-ico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;}
+.sc-val{font-size:28px;font-weight:900;margin-bottom:2px;letter-spacing:-.6px;}
+.sc-lbl{font-size:12px;color:var(--text2);font-weight:500;}
+
+/* ── Upgrade strip ── */
+.up-strip{background:linear-gradient(135deg,#FFF7ED,#FEF3C7);border:1.5px solid rgba(249,115,22,.2);border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:22px;flex-wrap:wrap;}
+
+/* ── Quick actions ── */
+.qa-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px;}
+.qa{display:flex;align-items:center;gap:11px;padding:14px;border:1.5px solid var(--bdr);border-radius:12px;cursor:pointer;transition:.18s;background:var(--bg2);}
+.qa:hover{border-color:var(--or);background:var(--orl);transform:translateY(-2px);box-shadow:var(--sh);}
+.qa-ico{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.qa-lbl{font-size:13px;font-weight:700;}
+.qa-sub{font-size:11px;color:var(--text2);margin-top:2px;}
+
+/* ── Activity feed ── */
+.act-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bg3);}
+.act-item:last-child{border:none;}
+.act-ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;}
+.act-info{flex:1;min-width:0;}
+.act-title{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.act-sub{font-size:11px;color:var(--text3);margin-top:1px;}
+.act-time{font-size:11px;color:var(--text3);flex-shrink:0;}
+
+/* ── Mini bar chart ── */
+.chart-wrap{display:flex;align-items:flex-end;gap:4px;height:80px;}
+.ch-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.ch-bar{width:100%;border-radius:3px 3px 0 0;background:var(--grad);min-height:2px;transition:height .6s ease;}
+.ch-lbl{font-size:9px;color:var(--text3);font-weight:500;}
+
+/* ── Link cards ── */
+.lcard{background:var(--bg2);border:1.5px solid var(--bdr);border-radius:10px;padding:14px;margin-bottom:10px;transition:.18s;}
+.lcard:hover{border-color:var(--bdr2);box-shadow:var(--sh);}
+.lcard h4{font-size:13px;font-weight:700;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lshort{font-size:12px;color:var(--or);font-weight:700;margin-bottom:6px;}
+.lmeta{font-size:11.5px;color:var(--text3);display:flex;gap:12px;flex-wrap:wrap;}
+.lacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+.lexp{font-size:10.5px;padding:2px 8px;border-radius:50px;font-weight:700;}
+.lexp.expired{background:var(--rl);color:var(--red);}
+.lexp.active_{background:var(--gl);color:var(--green);}
+.lexp.limited{background:var(--bl);color:var(--blue);}
+
+/* ── QR generator ── */
+.qr-types{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;}
+.qt{padding:7px 13px;border-radius:6px;border:1.5px solid var(--bdr);background:var(--bg3);font-size:12px;font-weight:600;cursor:pointer;transition:.15s;color:var(--text2);font-family:'Plus Jakarta Sans',sans-serif;}
+.qt:hover,.qt.active{background:var(--orl);border-color:var(--or);color:var(--or);}
+.lock-ov{position:relative;}
+.lock-ov.locked::after{content:'';position:absolute;inset:0;background:rgba(248,250,252,.8);border-radius:8px;z-index:1;backdrop-filter:blur(2px);}
+.lock-ov.locked .lock-lbl{display:flex;}
+.lock-lbl{display:none;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2;background:var(--grad);color:#fff;padding:6px 14px;border-radius:50px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:var(--shm);cursor:pointer;}
+.qr-preview{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:220px;border:2px dashed var(--bdr2);border-radius:12px;padding:20px;background:var(--bg3);position:relative;margin-bottom:12px;transition:.2s;}
+.qr-preview.has-qr{border-style:solid;border-color:var(--bdr);background:var(--bg2);}
+.qr-empty{text-align:center;color:var(--text3);}
+.qr-empty p{font-size:13px;margin-top:8px;}
+.frame-opts{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px;}
+.fopt{padding:8px 6px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg3);cursor:pointer;text-align:center;font-size:10.5px;font-weight:600;color:var(--text2);transition:.15s;}
+.fopt:hover,.fopt.active{border-color:var(--or);background:var(--orl);color:var(--or);}
+.fopt .fo-ic{font-size:18px;display:block;margin-bottom:3px;}
+.shape-opts{display:flex;gap:8px;margin-bottom:14px;}
+.sopt{flex:1;padding:9px 6px;border-radius:8px;border:1.5px solid var(--bdr);background:var(--bg3);cursor:pointer;text-align:center;font-size:11px;font-weight:600;color:var(--text2);transition:.15s;}
+.sopt:hover,.sopt.active{border-color:var(--or);background:var(--orl);color:var(--or);}
+
+/* ── Analytics ── */
+.a-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:10px;}
+.dev-row{display:flex;flex-direction:column;gap:10px;}
+.dev-item{display:grid;grid-template-columns:80px 1fr 36px;align-items:center;gap:8px;font-size:12.5px;}
+.dev-track{background:var(--bg3);border-radius:50px;height:6px;overflow:hidden;}
+.dev-fill{height:100%;border-radius:50px;background:var(--grad);transition:width 1s ease;}
+.citem{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bg3);font-size:13px;}
+.citem:last-child{border:none;}
+
+/* ── Chat ── */
+.chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 190px);min-height:400px;}
+.chat-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;}
+.bubble{max-width:80%;padding:10px 14px;border-radius:12px;font-size:13.5px;line-height:1.55;}
+.bubble.user{align-self:flex-end;background:var(--grad);color:#fff;border-bottom-right-radius:4px;}
+.bubble.bot{align-self:flex-start;background:var(--bg3);color:var(--text);border-bottom-left-radius:4px;}
+.chat-in{display:flex;gap:8px;padding:12px;border-top:1.5px solid var(--bdr);}
+.chat-in input{flex:1;padding:10px 14px;border:1.5px solid var(--bdr);border-radius:20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;background:var(--bg3);}
+.chat-in input:focus{border-color:var(--or);background:var(--bg2);}
+
+/* ── Notif cards ── */
+.ncard{display:flex;gap:12px;padding:13px;border-radius:10px;border:1.5px solid var(--bdr);cursor:pointer;transition:.15s;margin-bottom:8px;}
+.ncard:hover{background:var(--bg3);}
+.ncard.unread{border-color:rgba(249,115,22,.3);background:var(--orl);}
+.ndotc{width:9px;height:9px;border-radius:50%;background:var(--bdr2);flex-shrink:0;margin-top:4px;}
+.ndotc.unread{background:var(--or);}
+.ncard h4{font-size:13px;font-weight:700;margin-bottom:3px;}
+.ncard p{font-size:12.5px;color:var(--text2);line-height:1.5;}
+.ntime{font-size:11px;color:var(--text3);margin-top:5px;}
+
+/* ── Upgrade page ── */
+.up-hero{text-align:center;padding:20px 0;}
+.up-price{font-size:52px;font-weight:900;letter-spacing:-2px;margin:12px 0;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+.up-grid{background:var(--bg2);border:1.5px solid var(--bdr);border-radius:12px;padding:20px;margin:18px 0;display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.uf{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--text2);}
+.uf-ico{width:18px;height:18px;border-radius:50%;background:var(--gl);border:1px solid rgba(16,185,129,.3);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+/* ── Spinner ── */
+.sp{width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:sp_ .7s linear infinite;}
+@keyframes sp_{to{transform:rotate(360deg);}}
+
+/* ── Responsive ── */
+@media(max-width:900px){.twocol{grid-template-columns:1fr;}.frow{grid-template-columns:1fr;}.qa-grid{grid-template-columns:1fr 1fr;}.up-grid{grid-template-columns:1fr;}}
+@media(max-width:768px){.sidebar{transform:translateX(-100%);}.sidebar.open{transform:translateX(0);}.sclose{display:flex;}.hmbg{display:flex;}.dash-main{margin-left:0;}.d-content{padding:14px;}.stats-row{grid-template-columns:1fr 1fr;}}
+@media(max-width:480px){.frame-opts{grid-template-columns:repeat(3,1fr);}.qa-grid{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+
+<div id="tw"></div>
+
+<!-- Auth gate -->
+<div id="loadGate">
+  <div class="lg-inner">
+    <div class="lg-mark">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+        <rect x="1" y="1" width="8" height="8" rx="1.5" fill="white"/>
+        <rect x="3.5" y="3.5" width="3" height="3" fill="#F97316"/>
+        <rect x="15" y="1" width="8" height="8" rx="1.5" fill="white"/>
+        <rect x="17.5" y="3.5" width="3" height="3" fill="#F97316"/>
+        <rect x="1" y="15" width="8" height="8" rx="1.5" fill="white"/>
+        <rect x="3.5" y="17.5" width="3" height="3" fill="#F97316"/>
+      </svg>
+    </div>
+    <div class="lg-name">Trisend</div>
+    <div class="lg-dots"><div class="lg-dot"></div><div class="lg-dot"></div><div class="lg-dot"></div></div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
+<div class="soverlay" id="soverlay" onclick="toggleSidebar(false)"></div>
+
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+  <div class="s-head">
+    <a class="logo" href="/">
+      <div class="lmark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <rect x="1" y="1" width="8" height="8" rx="1.5" fill="white"/>
+          <rect x="3.5" y="3.5" width="3" height="3" fill="#F97316"/>
+          <rect x="15" y="1" width="8" height="8" rx="1.5" fill="white"/>
+          <rect x="17.5" y="3.5" width="3" height="3" fill="#F97316"/>
+          <rect x="1" y="15" width="8" height="8" rx="1.5" fill="white"/>
+          <rect x="3.5" y="17.5" width="3" height="3" fill="#F97316"/>
+        </svg>
+      </div>Trisend
+    </a>
+    <button class="sclose" onclick="toggleSidebar(false)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="s-user">
+    <div class="s-urow">
+      <div class="av" id="sAv">U</div>
+      <div class="u-info">
+        <div class="u-name" id="sName">Loading…</div>
+        <div class="u-email" id="sEmail"></div>
+        <div class="ppill free" id="sPill">Free</div>
+      </div>
+    </div>
+  </div>
+  <nav class="s-nav">
+    <div class="slbl">Main</div>
+    <div class="ni active" data-p="home" onclick="showPanel('home')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>
+      Dashboard
+    </div>
+    <div class="ni" data-p="qr" onclick="showPanel('qr')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
+      QR Generator
+    </div>
+    <div class="ni" data-p="links" onclick="showPanel('links')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></span>
+      Short Links
+    </div>
+    <div class="ni" data-p="analytics" onclick="showPanel('analytics')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
+      Analytics
+    </div>
+    <div class="s-sep"></div>
+    <div class="slbl">More</div>
+    <div class="ni" data-p="notifications" onclick="showPanel('notifications')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg></span>
+      Notifications
+      <span class="nbadge hidden" id="nBadge">0</span>
+    </div>
+    <div class="ni" data-p="chat" onclick="showPanel('chat')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg></span>
+      AI Assistant
+    </div>
+    <div class="ni" data-p="settings" onclick="showPanel('settings')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></span>
+      Settings
+    </div>
+    <div class="ni hidden" id="upNav" data-p="upgrade" onclick="showPanel('upgrade')">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
+      Upgrade
+    </div>
+  </nav>
+  <div class="s-bot">
+    <div class="ni" onclick="doLogout()" style="color:var(--red);">
+      <span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
+      Log Out
+    </div>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="dash-main">
+  <div class="topbar">
+    <div class="tb-l">
+      <button class="hmbg" onclick="toggleSidebar(true)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="tb-title" id="tbTitle">Dashboard</span>
+    </div>
+    <div class="tb-r">
+      <button class="notif-btn" onclick="showPanel('notifications')" id="bellBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      </button>
+      <div class="av" id="tbAv" style="width:34px;height:34px;font-size:13px;cursor:pointer;" onclick="showPanel('settings')">U</div>
+    </div>
+  </div>
+
+  <div class="d-content">
+
+    <!-- HOME -->
+    <div class="panel active" id="panel-home">
+      <div class="up-strip hidden" id="upStrip">
+        <div>
+          <div style="font-size:14px;font-weight:800;">⭐ Unlock Premium</div>
+          <div style="font-size:12.5px;color:var(--text2);margin-top:2px;">Unlimited QR codes, custom branding &amp; advanced analytics</div>
+        </div>
+        <button class="btn bp" onclick="showPanel('upgrade')" id="stripUpBtn">Upgrade — Lifetime Access</button>
+      </div>
+      <div style="margin-bottom:20px;">
+        <h2 style="font-size:22px;font-weight:900;letter-spacing:-.4px;" id="welcomeMsg">Welcome back!</h2>
+        <p style="font-size:13.5px;color:var(--text2);margin-top:3px;">Here's your Trisend overview</p>
+      </div>
+      <div class="stats-row">
+        <div class="sc"><div class="sc-ico" style="background:var(--orl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div><div class="sc-val" id="hQR">–</div><div class="sc-lbl">QR Codes</div></div>
+        <div class="sc"><div class="sc-ico" style="background:var(--bl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div><div class="sc-val" id="hLinks">–</div><div class="sc-lbl">Short Links</div></div>
+        <div class="sc"><div class="sc-ico" style="background:var(--gl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="sc-val" id="hClicks">–</div><div class="sc-lbl">Total Clicks</div></div>
+        <div class="sc"><div class="sc-ico" style="background:#F3E8FF;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></div><div class="sc-val" id="hScans">–</div><div class="sc-lbl">QR Scans</div></div>
+      </div>
+      <h3 style="font-size:13px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);margin-bottom:12px;">Quick Actions</h3>
+      <div class="qa-grid">
+        <div class="qa" onclick="showPanel('qr')"><div class="qa-ico" style="background:var(--orl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div><div><div class="qa-lbl">QR Code</div><div class="qa-sub">Generate &amp; customize</div></div></div>
+        <div class="qa" onclick="showPanel('links')"><div class="qa-ico" style="background:var(--bl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div><div><div class="qa-lbl">Short Link</div><div class="qa-sub">Shorten &amp; track</div></div></div>
+        <div class="qa" onclick="showPanel('analytics')"><div class="qa-ico" style="background:var(--gl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div><div class="qa-lbl">Analytics</div><div class="qa-sub">Clicks &amp; countries</div></div></div>
+        <div class="qa" onclick="showPanel('upgrade')"><div class="qa-ico" style="background:var(--orl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2" stroke-linecap="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></div><div><div class="qa-lbl">Go Premium</div><div class="qa-sub" id="qaUpgradeSub">Pay once, keep forever</div></div></div>
+      </div>
+      <div class="twocol">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"><div class="ctitle">Recent Activity</div></div>
+          <div id="recentAct"><p style="font-size:13px;color:var(--text3);text-align:center;padding:20px 0;">Loading…</p></div>
+        </div>
+        <div class="card">
+          <div class="ctitle" style="margin-bottom:4px;">Clicks — Last 7 Days</div>
+          <p style="font-size:12px;color:var(--text3);margin-bottom:14px;">Real data from your links</p>
+          <div class="chart-wrap" id="homeChart"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"><div class="ctitle">Recent Links</div><button class="btn bg bsm" onclick="showPanel('links')">View All →</button></div>
+        <div id="homeLinks"><p style="font-size:13px;color:var(--text3);">Loading…</p></div>
+      </div>
+    </div>
+
+    <!-- QR GENERATOR -->
+    <div class="panel" id="panel-qr">
+      <h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:4px;">QR Code Generator</h2>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Configure below, then click Generate.</p>
+      <div class="twocol" style="align-items:start;">
+        <div>
+          <div class="card" style="margin-bottom:14px;">
+            <div class="ctitle" style="margin-bottom:12px;">QR Type</div>
+            <div class="qr-types">
+              <button class="qt active" onclick="setQRType('url',this)">URL</button>
+              <button class="qt" onclick="setQRType('text',this)">Text</button>
+              <button class="qt" onclick="setQRType('wifi',this)">WiFi</button>
+              <button class="qt" onclick="setQRType('contact',this)">vCard</button>
+              <button class="qt" onclick="setQRType('email',this)">Email</button>
+              <button class="qt" onclick="setQRType('phone',this)">Phone</button>
+              <button class="qt" onclick="setQRType('sms',this)">SMS</button>
+              <button class="qt" onclick="setQRType('location',this)">Location</button>
+            </div>
+            <div id="qi-url"><div class="fg"><label class="flbl">Website URL</label><input id="qrURL" class="fi" type="url" placeholder="https://yourwebsite.com"></div></div>
+            <div id="qi-text" class="hidden"><div class="fg"><label class="flbl">Text Content</label><textarea id="qrText" class="fi" rows="3" placeholder="Enter any text..."></textarea></div></div>
+            <div id="qi-wifi" class="hidden"><div class="fg"><label class="flbl">Network Name (SSID)</label><input id="qrSSID" class="fi" placeholder="MyWiFi"></div><div class="frow"><div class="fg"><label class="flbl">Password</label><input id="qrWPass" class="fi"></div><div class="fg"><label class="flbl">Security</label><select id="qrWSec" class="fi"><option>WPA</option><option>WEP</option><option value="nopass">None</option></select></div></div></div>
+            <div id="qi-contact" class="hidden"><div class="frow"><div class="fg"><label class="flbl">First Name</label><input id="qrCFN" class="fi" placeholder="John"></div><div class="fg"><label class="flbl">Last Name</label><input id="qrCLN" class="fi" placeholder="Doe"></div></div><div class="fg"><label class="flbl">Phone</label><input id="qrCPh" class="fi" placeholder="+234..."></div><div class="fg"><label class="flbl">Email</label><input id="qrCEm" class="fi" placeholder="john@example.com"></div><div class="fg"><label class="flbl">Organisation</label><input id="qrCOrg" class="fi"></div></div>
+            <div id="qi-email" class="hidden"><div class="fg"><label class="flbl">To Address</label><input id="qrETo" class="fi" type="email" placeholder="recipient@example.com"></div><div class="fg"><label class="flbl">Subject</label><input id="qrESub" class="fi"></div><div class="fg"><label class="flbl">Body</label><textarea id="qrEBody" class="fi" rows="2"></textarea></div></div>
+            <div id="qi-phone" class="hidden"><div class="fg"><label class="flbl">Phone Number</label><input id="qrPhone" class="fi" placeholder="+234 800 000 0000"></div></div>
+            <div id="qi-sms" class="hidden"><div class="fg"><label class="flbl">Phone Number</label><input id="qrSPh" class="fi" placeholder="+234 800 000 0000"></div><div class="fg"><label class="flbl">Message</label><textarea id="qrSMsg" class="fi" rows="2"></textarea></div></div>
+            <div id="qi-location" class="hidden"><div class="frow"><div class="fg"><label class="flbl">Latitude</label><input id="qrLat" class="fi" placeholder="6.5244"></div><div class="fg"><label class="flbl">Longitude</label><input id="qrLng" class="fi" placeholder="3.3792"></div></div></div>
+          </div>
+          <div class="card" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;"><div class="ctitle">Customisation</div><span class="badge bo">Premium</span></div>
+            <div class="lock-ov locked" id="pfColors">
+              <div class="lock-lbl" onclick="showPanel('upgrade')">Upgrade to unlock</div>
+              <div class="fg"><div class="flbl">Colors</div><div style="display:flex;gap:12px;align-items:center;"><label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;"><input type="color" id="qrFg" value="#000000" disabled style="width:32px;height:32px;border-radius:6px;border:1.5px solid var(--bdr);cursor:pointer;padding:2px;"> Foreground</label><label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;"><input type="color" id="qrBg" value="#FFFFFF" disabled style="width:32px;height:32px;border-radius:6px;border:1.5px solid var(--bdr);cursor:pointer;padding:2px;"> Background</label></div></div>
+            </div>
+            <div class="frow" style="margin-top:10px;"><div class="fg"><label class="flbl">Size (px)</label><select id="qrSz" class="fi"><option value="200">200px</option><option value="300" selected>300px</option><option value="400">400px</option><option value="500">500px</option></select></div><div class="fg"><label class="flbl">Error Correction</label><select id="qrECC" class="fi"><option value="L">Low (7%)</option><option value="M" selected>Medium (15%)</option><option value="Q">High (25%)</option><option value="H">Max (30%) — Logo safe</option></select></div></div>
+            <div class="lock-ov locked" id="pfShape">
+              <div class="lock-lbl" onclick="showPanel('upgrade')">Upgrade to unlock</div>
+              <div class="fg"><div class="flbl">Module Shape</div><div class="shape-opts"><button class="sopt active" onclick="setShape('square',this)">Square</button><button class="sopt" onclick="setShape('dots',this)">Dots</button><button class="sopt" onclick="setShape('rounded',this)">Rounded</button></div></div>
+            </div>
+            <div class="lock-ov locked" id="pfFrame">
+              <div class="lock-lbl" onclick="showPanel('upgrade')">Upgrade to unlock</div>
+              <div class="fg"><div class="flbl">Scan Frame</div><div class="frame-opts"><button class="fopt active" onclick="setFrame(0,this)"><span class="fo-ic">◻</span>None</button><button class="fopt" onclick="setFrame(1,this)"><span class="fo-ic">📐</span>Corners</button><button class="fopt" onclick="setFrame(2,this)"><span class="fo-ic">🔲</span>Scan Me</button><button class="fopt" onclick="setFrame(3,this)"><span class="fo-ic">📸</span>Banner</button><button class="fopt" onclick="setFrame(4,this)"><span class="fo-ic">🎯</span>Target</button></div></div>
+            </div>
+            <div class="lock-ov locked" id="pfLogo">
+              <div class="lock-lbl" onclick="showPanel('upgrade')">Upgrade to unlock</div>
+              <div class="fg"><label class="flbl">Embed Logo (set ECC to Max first)</label><input type="file" id="qrLogo" class="fi" accept="image/*" disabled style="padding:7px;"></div>
+            </div>
+          </div>
+          <button class="btn bp bfull blg" onclick="generateQR()" id="genBtn">Generate QR Code</button>
+        </div>
+        <div style="position:sticky;top:78px;">
+          <div class="card">
+            <div class="ctitle" style="margin-bottom:14px;">Preview</div>
+            <div class="qr-preview" id="qrPreviewWrap">
+              <div class="qr-empty" id="qrEmpty">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="5" y="5" width="3" height="3" fill="#CBD5E1"/><rect x="16" y="5" width="3" height="3" fill="#CBD5E1"/><rect x="5" y="16" width="3" height="3" fill="#CBD5E1"/></svg>
+                <p>Configure &amp; click Generate</p>
+              </div>
+              <canvas id="qrCanvas" style="display:none;max-width:100%;"></canvas>
+              <canvas id="qrOutput" style="display:none;max-width:100%;"></canvas>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <button class="btn bp bfull" id="dlBtn" onclick="downloadQR()" disabled>↓ Download PNG</button>
+              <button class="btn bg bfull" id="saveBtn" onclick="saveQR()" disabled>Save to Account</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SHORT LINKS -->
+    <div class="panel" id="panel-links">
+      <h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:4px;">Short Links</h2>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Create smart, trackable short links.</p>
+      <div class="twocol">
+        <div>
+          <div class="card" style="margin-bottom:14px;">
+            <div class="ctitle" style="margin-bottom:14px;">Shorten a Link</div>
+            <div class="fg"><label class="flbl">Long URL *</label><input id="longURL" type="url" class="fi" placeholder="https://your-very-long-url.com"></div>
+            <div class="lock-ov locked" id="pfAlias"><div class="lock-lbl" onclick="showPanel('upgrade')">Premium</div><div class="fg"><label class="flbl">Custom Alias (optional)</label><input id="customAlias" class="fi" placeholder="my-link-name"></div></div>
+            <div class="lock-ov locked" id="pfExpiry" style="margin-top:8px;"><div class="lock-lbl" onclick="showPanel('upgrade')">Premium</div><div class="frow"><div class="fg"><label class="flbl">Expires On</label><input id="linkExpiry" type="date" class="fi"></div><div class="fg"><label class="flbl">Max Clicks</label><input id="linkMaxClicks" type="number" class="fi" placeholder="e.g. 100" min="1"></div></div></div>
+            <div class="lock-ov locked" id="pfLinkPwd" style="margin-top:8px;"><div class="lock-lbl" onclick="showPanel('upgrade')">Premium</div><div class="fg"><label class="flbl">Password Protect</label><input id="linkPassword" type="text" class="fi" placeholder="Leave empty for none"></div></div>
+            <button class="btn bp bfull" style="margin-top:14px;" onclick="shortenLink()" id="shortenBtn">Shorten Link</button>
+            <div id="linkResult" style="display:none;margin-top:14px;padding:14px;background:var(--gl);border:1.5px solid rgba(16,185,129,.3);border-radius:10px;">
+              <div style="font-size:12px;color:var(--green);font-weight:700;margin-bottom:5px;">✓ Link created!</div>
+              <div style="font-size:14px;font-weight:800;word-break:break-all;margin-bottom:10px;color:var(--text);" id="shortLinkTxt"></div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="btn bsg bsm" onclick="copyShortLink()">Copy</button><button class="btn bsb bsm" onclick="qrFromLink()">Make QR</button></div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"><div class="ctitle">My Links</div><span id="linkCount" style="font-size:12px;color:var(--text3);font-weight:500;"></span></div>
+            <div id="linksList"><div class="empty-s"><p>No links yet.<br>Create your first above!</p></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS -->
+    <div class="panel" id="panel-analytics">
+      <div class="a-hdr">
+        <div><h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:4px;">Analytics</h2><p style="font-size:13px;color:var(--text2);">Real-time data from your QR scans &amp; link clicks</p></div>
+        <button class="btn bg bsm" onclick="exportCSV()">Export CSV</button>
+      </div>
+      <div class="stats-row">
+        <div class="sc"><div class="sc-ico" style="background:var(--orl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div><div class="sc-val" id="aQR">–</div><div class="sc-lbl">QR Codes</div></div>
+        <div class="sc"><div class="sc-ico" style="background:var(--bl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div><div class="sc-val" id="aLinks">–</div><div class="sc-lbl">Short Links</div></div>
+        <div class="sc"><div class="sc-ico" style="background:var(--gl);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="sc-val" id="aClicks">–</div><div class="sc-lbl">Link Clicks</div></div>
+        <div class="sc"><div class="sc-ico" style="background:#F3E8FF;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></div><div class="sc-val" id="aScans">–</div><div class="sc-lbl">QR Scans</div></div>
+      </div>
+      <div class="twocol" style="margin-bottom:16px;">
+        <div class="card"><div class="ctitle" style="margin-bottom:14px;">Clicks — Last 7 Days</div><div class="chart-wrap" id="lineChart"></div></div>
+        <div class="card"><div class="ctitle" style="margin-bottom:14px;">Top Countries</div><div id="countryChart"><p style="font-size:13px;color:var(--text3);">Loading…</p></div></div>
+      </div>
+      <div class="twocol">
+        <div class="card"><div class="ctitle" style="margin-bottom:14px;">Device Breakdown</div><div id="deviceChart" class="dev-row"><p style="font-size:13px;color:var(--text3);">Loading…</p></div></div>
+        <div class="card"><div class="ctitle" style="margin-bottom:14px;">Browser Breakdown</div><div id="browserChart" class="dev-row"><p style="font-size:13px;color:var(--text3);">Loading…</p></div></div>
+      </div>
+      <div class="card" style="margin-top:16px;"><div class="ctitle" style="margin-bottom:14px;">Your QR Codes</div><div id="analyticsQRs"><p style="font-size:13px;color:var(--text3);">Loading…</p></div></div>
+    </div>
+
+    <!-- NOTIFICATIONS -->
+    <div class="panel" id="panel-notifications">
+      <h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:4px;">Notifications</h2>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Updates from Trisend</p>
+      <div id="notifList"><p style="font-size:13px;color:var(--text3);">Loading…</p></div>
+    </div>
+
+    <!-- AI CHAT -->
+    <div class="panel" id="panel-chat">
+      <h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:16px;">AI Assistant</h2>
+      <div class="card" style="padding:0;">
+        <div class="chat-wrap">
+          <div class="chat-msgs" id="chatMsgs">
+            <div class="bubble bot">Hi! I'm Trisend AI. Ask me anything about QR codes, short links, analytics, or your plan!</div>
+          </div>
+          <div class="chat-in">
+            <input id="chatInput" placeholder="Ask anything about Trisend…" onkeydown="if(event.key==='Enter')sendChat()">
+            <button class="btn bp" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="panel" id="panel-settings">
+      <h2 style="font-size:20px;font-weight:900;letter-spacing:-.4px;margin-bottom:22px;">Settings</h2>
+      <div class="twocol">
+        <div>
+          <div class="card" style="margin-bottom:14px;">
+            <div class="ctitle" style="margin-bottom:14px;">Profile</div>
+            <div class="fg"><label class="flbl">Display Name</label><input id="stName" class="fi" placeholder="Your name"></div>
+            <div class="fg"><label class="flbl">Email</label><input id="stEmail" class="fi" disabled></div>
+            <button class="btn bp" onclick="saveName()">Save Changes</button>
+          </div>
+          <div class="card" style="margin-bottom:14px;">
+            <div class="ctitle" style="margin-bottom:14px;">Change Password</div>
+            <div class="fg"><label class="flbl">New Password</label><input id="stNewPass" type="password" class="fi" placeholder="At least 8 characters"></div>
+            <button class="btn bg" onclick="changePass()">Update Password</button>
+          </div>
+          <div class="card">
+            <div class="ctitle" style="margin-bottom:4px;">Report a Bug</div>
+            <p style="font-size:12.5px;color:var(--text2);margin-bottom:12px;">Found something broken?</p>
+            <div class="fg"><label class="flbl">Title</label><input id="bugTitle" class="fi" placeholder="Brief description"></div>
+            <div class="fg"><label class="flbl">Details</label><textarea id="bugDesc" class="fi" rows="3" placeholder="Steps to reproduce…"></textarea></div>
+            <button class="btn bg" onclick="submitBug()">Submit Report</button>
+          </div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:14px;"><div class="ctitle" style="margin-bottom:14px;">Your Plan</div><div id="planInfo"></div><div id="planCTA" style="margin-top:12px;"></div></div>
+          <div class="card"><div class="ctitle" style="margin-bottom:14px;">Danger Zone</div><button class="btn bsr bfull" onclick="deleteAccount()">Delete Account</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- UPGRADE -->
+    <div class="panel" id="panel-upgrade">
+      <div class="up-hero">
+        <!-- Location loading state -->
+        <div id="upLoading" style="padding:20px 0;">
+          <div style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text3);"><div class="sp" style="border-color:rgba(100,116,139,.2);border-top-color:var(--text3);"></div>Detecting your region…</div>
+        </div>
+        <!-- Upgrade content — shown after location loads -->
+        <div id="upContent" style="display:none;">
+          <div style="display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:50px;background:var(--orl);color:var(--or);font-size:12px;font-weight:800;border:1px solid rgba(249,115,22,.3);margin-bottom:16px;">⚡ Lifetime Access — Pay Once, Keep Forever</div>
+          <h2 style="font-size:32px;font-weight:900;letter-spacing:-1px;">Unlock Everything</h2>
+          <p style="font-size:15px;color:var(--text2);margin:10px 0;">One payment. No subscriptions. No recurring fees.</p>
+          <!-- Dynamic price tag -->
+          <div class="up-price" id="upPriceTag">…</div>
+          <!-- Region badge -->
+          <div id="upRegionBadge" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:50px;background:var(--bg3);font-size:12px;font-weight:600;color:var(--text2);margin-bottom:20px;"></div>
+          <div class="up-grid">
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Unlimited QR codes</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Unlimited short links</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Custom QR colors &amp; shapes</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Logo embed in QR</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Scan Me &amp; custom frames</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Link expiry &amp; click limits</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Password-protect links</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Custom link aliases</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>Advanced analytics</div>
+            <div class="uf"><div class="uf-ico"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="3" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg></div>CSV export</div>
+          </div>
+          <button class="btn bp blg" id="upPayBtn" style="width:100%;max-width:360px;font-size:16px;padding:16px;" onclick="doPaystack()">
+            Upgrade Now
+          </button>
+          <p style="font-size:12px;color:var(--text3);margin-top:12px;" id="upPayNote">🔒 Secured by Paystack</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+firebase.initializeApp({
+  apiKey:'AIzaSyCgaYVSaKtXAQOVRTRfAGV6cWjPqG9x4Tc',
+  authDomain:'trisend-e7250.firebaseapp.com',
+  projectId:'trisend-e7250',
+  storageBucket:'trisend-e7250.firebasestorage.app',
+  messagingSenderId:'1088068014414',
+  appId:'1:1088068014414:web:77c1f5c1de544b6ab5ce1f'
+});
+const auth=firebase.auth();
+const db=firebase.firestore();
+let PAYSTACK_PK = ''; // Loaded securely from /api/config on init
+
+// ── State ────────────────────────────────────────────────────────────────────
+let CU=null,UD=null;
+let qrType='url',qrShape='square',qrFrame=0,qrGenerated=false,currentShortLink='';
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const $=id=>document.getElementById(id);
+function toast(msg,type='inf'){
+  const d=document.createElement('div');
+  d.className='t '+type;d.textContent=msg;
+  $('tw').appendChild(d);
+  setTimeout(()=>d.remove(),4200);
+}
+function timeAgo(ts){
+  if(!ts)return '';
+  const d=ts?.toDate?ts.toDate():new Date(ts);
+  const s=(Date.now()-d)/1000;
+  if(s<60)return 'just now';
+  if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';
+  if(s<604800)return Math.floor(s/86400)+'d ago';
+  return d.toLocaleDateString();
+}
+function genCode(n=7){
+  const c='abcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({length:n},()=>c[Math.floor(Math.random()*c.length)]).join('');
+}
+
+// ── Auth guard ───────────────────────────────────────────────────────────────
+// Show loading gate until Firebase resolves — then either show dashboard or redirect to login
+auth.onAuthStateChanged(async user=>{
+  if(!user){
+    window.location.href='/login';
+    return;
+  }
+  CU=user;
+  try{
+    const snap=await db.collection('users').doc(user.uid).get();
+    if(!snap.exists){
+      // New user without doc — create one
+      UD={displayName:user.displayName||'User',email:user.email,photoURL:user.photoURL||'',plan:'free',role:'user'};
+      await db.collection('users').doc(user.uid).set({...UD,createdAt:firebase.firestore.FieldValue.serverTimestamp(),qrCount:0,linkCount:0});
+    } else {
+      UD=snap.data();
+    }
+  } catch(e){
+    UD={displayName:user.displayName||'User',email:user.email,plan:'free',role:'user'};
+  }
+  initDashboard();
+});
+
+async function loadConfig(){
+  try{
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    if(cfg.paystackPublicKey) PAYSTACK_PK = cfg.paystackPublicKey;
+  }catch(e){
+    console.error('Failed to load config:', e);
+  }
+}
+
+function initDashboard(){
+  loadConfig(); // Fetch Paystack key from server
+  // Populate user info
+  const name=UD.displayName||CU.displayName||'User';
+  const email=CU.email||'';
+  const initials=name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+
+  $('sName').textContent=name;
+  $('sEmail').textContent=email;
+  $('sAv').textContent=initials;
+  $('tbAv').textContent=initials;
+  $('welcomeMsg').textContent='Welcome back, '+name.split(' ')[0]+'!';
+
+  if(UD.plan==='premium'){
+    $('sPill').className='ppill premium';
+    $('sPill').textContent='Premium';
+    unlockPremium();
+    $('upNav').classList.add('hidden');
+  } else {
+    $('upStrip').classList.remove('hidden');
+    $('upNav').classList.remove('hidden');
+  }
+  if(UD.photoURL){
+    [$('sAv'),$('tbAv')].forEach(el=>{el.innerHTML=`<img src="${UD.photoURL}" alt="${name}">`;});
+  }
+
+  if($('stName'))$('stName').value=name;
+  if($('stEmail'))$('stEmail').value=email;
+  renderPlanInfo();
+
+  // Load data in parallel
+  Promise.all([loadStats(),loadLinks(),loadNotifications()]);
+
+  // Hide gate, show app
+  const gate=$('loadGate');
+  gate.style.opacity='0';
+  setTimeout(()=>{gate.style.display='none';$('app').style.display='flex';},300);
+}
+
+// ── Panel navigation ─────────────────────────────────────────────────────────
+const TITLES={home:'Dashboard',qr:'QR Generator',links:'Short Links',analytics:'Analytics',notifications:'Notifications',chat:'AI Assistant',settings:'Settings',upgrade:'Upgrade'};
+function showPanel(p){
+  document.querySelectorAll('.panel').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.ni[data-p]').forEach(e=>e.classList.toggle('active',e.dataset.p===p));
+  const el=$('panel-'+p);if(el)el.classList.add('active');
+  $('tbTitle').textContent=TITLES[p]||p;
+  toggleSidebar(false);
+  if(p==='analytics')loadAnalytics();
+  if(p==='notifications')loadNotifications();
+  if(p==='upgrade')loadUpgradePanel();
+}
+function toggleSidebar(open){
+  $('sidebar').classList.toggle('open',open);
+  $('soverlay').classList.toggle('show',open);
+}
+function doLogout(){
+  auth.signOut().then(()=>window.location.href='/login');
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+async function loadStats(){
+  if(!CU)return;
+  try{
+    const [qrSnap,linkSnap]=await Promise.all([
+      db.collection('qrcodes').where('userId','==',CU.uid).get(),
+      db.collection('shortlinks').where('userId','==',CU.uid).get()
+    ]);
+    const qrs=[],links=[];
+    qrSnap.forEach(d=>qrs.push(d.data()));
+    linkSnap.forEach(d=>links.push(d.data()));
+
+    const totalScans=qrs.reduce((a,r)=>a+(r.scans||0),0);
+    const totalClicks=links.reduce((a,r)=>a+(r.clicks||0),0);
+
+    [$('hQR'),$('aQR')].forEach(el=>{if(el)el.textContent=qrs.length;});
+    [$('hLinks'),$('aLinks')].forEach(el=>{if(el)el.textContent=links.length;});
+    [$('hClicks'),$('aClicks')].forEach(el=>{if(el)el.textContent=totalClicks;});
+    [$('hScans'),$('aScans')].forEach(el=>{if(el)el.textContent=totalScans;});
+
+    renderHomeActivity(qrs,links);
+    renderHomeChart(links);
+    renderHomeLinks(links.slice(0,3));
+  }catch(e){console.error('Stats error:',e);}
+}
+
+function renderHomeActivity(qrs,links){
+  const el=$('recentAct');if(!el)return;
+  const items=[];
+  qrs.forEach(r=>items.push({type:'qr',label:r.label||r.data||'QR Code',ts:r.createdAt}));
+  links.forEach(r=>items.push({type:'link',label:r.originalUrl,ts:r.createdAt}));
+  items.sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
+  const recent=items.slice(0,5);
+  if(!recent.length){el.innerHTML='<div class="empty-s"><p>No activity yet.</p></div>';return;}
+  el.innerHTML=recent.map(it=>{
+    const isQR=it.type==='qr';
+    const ico=isQR?'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F97316" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>':'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>';
+    const bg=isQR?'var(--orl)':'var(--bl)';
+    const label=(it.label||'').slice(0,45);
+    return `<div class="act-item"><div class="act-ico" style="background:${bg};">${ico}</div><div class="act-info"><div class="act-title">${label}</div><div class="act-sub">${isQR?'QR Code saved':'Short link created'}</div></div><div class="act-time">${timeAgo(it.ts)}</div></div>`;
+  }).join('');
+}
+
+function renderHomeChart(links){
+  const days=[];
+  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);days.push(d);}
+  const counts=days.map(day=>{
+    return links.reduce((a,l)=>{
+      if(!l.clickLog)return a;
+      return a+l.clickLog.filter(ts=>{
+        if(!ts)return false;
+        const d=ts.toDate?ts.toDate():new Date(ts);
+        return d.toDateString()===day.toDateString();
+      }).length;
+    },0);
+  });
+  const max=Math.max(...counts,1);
+  const labels=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  ['homeChart','lineChart'].forEach(id=>{
+    const el=$(id);if(!el)return;
+    el.innerHTML=counts.map((v,i)=>{
+      const h=Math.round((v/max)*100);
+      const day=days[i];
+      const lbl=labels[day.getDay()];
+      return `<div class="ch-col"><div class="ch-bar" style="height:${Math.max(h,4)}%;opacity:${v>0?1:.25};"></div><div class="ch-lbl">${lbl}</div></div>`;
+    }).join('');
+  });
+}
+
+function renderHomeLinks(links){
+  const el=$('homeLinks');if(!el)return;
+  if(!links.length){el.innerHTML='<div class="empty-s"><p>No links yet.</p></div>';return;}
+  el.innerHTML=links.map(l=>{
+    const short=window.location.origin+'/'+l.code;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--bg3);">
+      <div style="min-width:0;flex:1;margin-right:10px;"><div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(l.originalUrl||'').slice(0,50)}</div><div style="font-size:11.5px;color:var(--or);font-weight:600;">${short.replace(window.location.origin,'')}</div></div>
+      <span style="font-size:12px;color:var(--text3);flex-shrink:0;">${l.clicks||0} clicks</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+async function loadAnalytics(){
+  if(!CU)return;
+  await loadStats();
+  try{
+    const [linkSnap,qrSnap]=await Promise.all([
+      db.collection('shortlinks').where('userId','==',CU.uid).get(),
+      db.collection('qrcodes').where('userId','==',CU.uid).get()
+    ]);
+    const links=[],qrs=[];
+    linkSnap.forEach(d=>links.push(d.data()));
+    qrSnap.forEach(d=>qrs.push(Object.assign({id:d.id},d.data())));
+
+    // Countries from clickLog metadata
+    const countryMap={},deviceMap={},browserMap={};
+    links.forEach(l=>{
+      (l.clickMeta||[]).forEach(m=>{
+        if(m.country)countryMap[m.country]=(countryMap[m.country]||0)+1;
+        if(m.device)deviceMap[m.device]=(deviceMap[m.device]||0)+1;
+        if(m.browser)browserMap[m.browser]=(browserMap[m.browser]||0)+1;
+      });
+    });
+
+    renderBreakdown('countryChart',countryMap,'countries',true);
+    renderDeviceBreakdown('deviceChart',deviceMap);
+    renderDeviceBreakdown('browserChart',browserMap);
+    renderAnalyticsQRs(qrs);
+  }catch(e){console.error('Analytics error:',e);}
+}
+
+function renderBreakdown(elId,map,label,isCountry){
+  const el=$(elId);if(!el)return;
+  const entries=Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(!entries.length){el.innerHTML=`<div class="empty-s"><p>No ${label} data yet.<br>Clicks with geolocation will appear here.</p></div>`;return;}
+  el.innerHTML=entries.map(([k,v])=>`<div class="citem"><span>${k}</span><strong>${v}</strong></div>`).join('');
+}
+
+function renderDeviceBreakdown(elId,map){
+  const el=$(elId);if(!el)return;
+  const entries=Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  const total=entries.reduce((a,[,v])=>a+v,0)||1;
+  if(!entries.length){el.innerHTML='<div class="empty-s"><p>No data yet.</p></div>';return;}
+  el.innerHTML=entries.map(([k,v])=>{
+    const pct=Math.round(v/total*100);
+    return `<div class="dev-item"><span style="font-weight:600;">${k}</span><div class="dev-track"><div class="dev-fill" style="width:${pct}%;"></div></div><span style="color:var(--text3);">${pct}%</span></div>`;
+  }).join('');
+}
+
+function renderAnalyticsQRs(qrs){
+  const el=$('analyticsQRs');if(!el)return;
+  if(!qrs.length){el.innerHTML='<div class="empty-s"><p>No QR codes yet.</p></div>';return;}
+  el.innerHTML=qrs.map(q=>`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--bg3);">
+      <div><div style="font-size:13px;font-weight:600;">${(q.label||q.data||'QR Code').slice(0,45)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px;">${q.type||'url'} · ${timeAgo(q.createdAt)}</div></div>
+      <div style="text-align:right;flex-shrink:0;"><div style="font-size:16px;font-weight:800;">${q.scans||0}</div><div style="font-size:10.5px;color:var(--text3);">scans</div></div>
+    </div>`).join('');
+}
+
+// ── Links ─────────────────────────────────────────────────────────────────────
+async function loadLinks(){
+  if(!CU)return;
+  try{
+    const snap=await db.collection('shortlinks').where('userId','==',CU.uid).orderBy('createdAt','desc').get();
+    const items=[];
+    snap.forEach(d=>items.push(Object.assign({id:d.id},d.data())));
+    $('linkCount').textContent=`${items.length} link${items.length!==1?'s':''}`;
+    const el=$('linksList');
+    if(!items.length){el.innerHTML='<div class="empty-s"><p>No links yet.<br>Create your first above!</p></div>';return;}
+    el.innerHTML=items.map(l=>{
+      const short=window.location.origin+'/'+l.code;
+      const now=new Date();
+      let status='';
+      if(l.maxClicks&&(l.clicks||0)>=l.maxClicks)status='<span class="lexp expired">Click limit reached</span>';
+      else if(l.expiresAt&&new Date(l.expiresAt)<now)status='<span class="lexp expired">Expired</span>';
+      else if(l.expiresAt)status=`<span class="lexp active_">Expires ${l.expiresAt}</span>`;
+      else if(l.maxClicks)status=`<span class="lexp limited">${l.clicks||0}/${l.maxClicks} clicks</span>`;
+      const title=(l.originalUrl||'Link').slice(0,55);
+      return `<div class="lcard">
+        <h4 title="${l.originalUrl||''}">${title}</h4>
+        <div class="lshort">${short.replace(window.location.origin,'')}${l.password?' 🔒':''}</div>
+        <div class="lmeta"><span>Clicks: <strong>${l.clicks||0}</strong></span><span>${timeAgo(l.createdAt)}</span></div>
+        ${status?`<div style="margin-top:6px;">${status}</div>`:''}
+        <div class="lacts">
+          <button class="btn bsb bsm" data-copy="${short}">Copy</button>
+          <button class="btn bsg bsm" onclick="showPanel('analytics')">Stats</button>
+          <button class="btn bsr bsm" data-del="${l.code}">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-copy]').forEach(btn=>btn.addEventListener('click',()=>{
+      navigator.clipboard.writeText(btn.getAttribute('data-copy')).then(()=>toast('Copied!','ok')).catch(()=>toast('Copy failed','err'));
+    }));
+    el.querySelectorAll('[data-del]').forEach(btn=>btn.addEventListener('click',()=>deleteLink(btn.getAttribute('data-del'))));
+  }catch(e){console.error('Links error:',e);}
+}
+
+async function shortenLink(){
+  if(!CU)return;
+  const url=$('longURL').value.trim();
+  if(!url){toast('Please enter a URL','err');return;}
+  const finalUrl=url.startsWith('http')?url:'https://'+url;
+  const isPrem=UD?.plan==='premium';
+  const btn=$('shortenBtn');
+  btn.disabled=true;btn.innerHTML='<div class="sp"></div> Creating…';
+
+  const doCreate=async(code)=>{
+    const expDate=isPrem&&$('linkExpiry')?$('linkExpiry').value||null:null;
+    const maxClks=isPrem&&$('linkMaxClicks')?parseInt($('linkMaxClicks').value)||null:null;
+    const pwdRaw=isPrem&&$('linkPassword')?$('linkPassword').value.trim():null;
+    const shortUrl=window.location.origin+'/'+code;
+    await db.collection('shortlinks').doc(code).set({
+      userId:CU.uid,originalUrl:finalUrl,code,clicks:0,
+      expiresAt:expDate,maxClicks:maxClks,
+      password:pwdRaw?btoa(pwdRaw):null,clickLog:[],clickMeta:[],
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    currentShortLink=shortUrl;
+    $('shortLinkTxt').textContent=shortUrl;
+    $('linkResult').style.display='block';
+    $('longURL').value='';
+    toast('Short link created!','ok');
+    loadLinks();loadStats();
+  };
+
+  try{
+    const aliasEl=$('customAlias');
+    if(isPrem&&aliasEl?.value.trim()){
+      const code=aliasEl.value.trim().toLowerCase().replace(/[^a-z0-9-]/g,'');
+      if(!code){toast('Invalid alias','err');btn.disabled=false;btn.textContent='Shorten Link';return;}
+      const ex=await db.collection('shortlinks').doc(code).get();
+      if(ex.exists){toast('That alias is already taken','err');btn.disabled=false;btn.textContent='Shorten Link';return;}
+      await doCreate(code);
+    } else if(!isPrem){
+      const snap=await db.collection('shortlinks').where('userId','==',CU.uid).get();
+      if(snap.size>=20){toast('Free plan limit: 20 links. Upgrade for unlimited!','err');showPanel('upgrade');btn.disabled=false;btn.textContent='Shorten Link';return;}
+      await doCreate(genCode());
+    } else {
+      await doCreate(genCode());
+    }
+  }catch(e){toast('Failed to create link','err');}
+  btn.disabled=false;btn.textContent='Shorten Link';
+}
+
+function copyShortLink(){
+  navigator.clipboard.writeText(currentShortLink).then(()=>toast('Copied!','ok')).catch(()=>toast('Copy failed','err'));
+}
+function qrFromLink(){
+  showPanel('qr');
+  const inp=$('qrURL');
+  if(inp){inp.value=currentShortLink;setQRType('url',document.querySelector('.qt'));}
+}
+function deleteLink(code){
+  if(!confirm('Delete this link? Cannot be undone.'))return;
+  db.collection('shortlinks').doc(code).delete()
+    .then(()=>{toast('Link deleted','ok');loadLinks();loadStats();})
+    .catch(()=>toast('Failed','err'));
+}
+
+// ── QR Generator ──────────────────────────────────────────────────────────────
+function setQRType(type,el){
+  qrType=type;
+  document.querySelectorAll('.qt').forEach(e=>e.classList.remove('active'));
+  if(el)el.classList.add('active');
+  ['url','text','wifi','contact','email','phone','sms','location'].forEach(t=>{
+    const d=$('qi-'+t);if(d)d.classList.toggle('hidden',t!==type);
+  });
+}
+
+function getQRData(){
+  const v=id=>($( id)||{}).value||'';
+  switch(qrType){
+    case 'url':   return v('qrURL');
+    case 'text':  return v('qrText');
+    case 'wifi':  return `WIFI:T:${v('qrWSec')};S:${v('qrSSID')};P:${v('qrWPass')};;`;
+    case 'contact': return `BEGIN:VCARD\nVERSION:3.0\nFN:${v('qrCFN')} ${v('qrCLN')}\nTEL:${v('qrCPh')}\nEMAIL:${v('qrCEm')}\nORG:${v('qrCOrg')}\nEND:VCARD`;
+    case 'email': return `mailto:${v('qrETo')}?subject=${encodeURIComponent(v('qrESub'))}&body=${encodeURIComponent(v('qrEBody'))}`;
+    case 'phone': return `tel:${v('qrPhone')}`;
+    case 'sms':   return `sms:${v('qrSPh')}?body=${encodeURIComponent(v('qrSMsg'))}`;
+    case 'location': return `geo:${v('qrLat')},${v('qrLng')}`;
+    default: return '';
+  }
+}
+
+function generateQR(){
+  const data=getQRData();
+  if(!data){toast('Please fill in the required field','err');return;}
+  const btn=$('genBtn');
+  btn.disabled=true;btn.innerHTML='<div class="sp"></div> Generating…';
+  qrGenerated=false;
+  const size=parseInt(($('qrSz')||{value:'300'}).value)||300;
+  const isPrem=UD?.plan==='premium';
+  const fg=isPrem?($('qrFg')||{value:'#000000'}).value:'#000000';
+  const bg=isPrem?($('qrBg')||{value:'#FFFFFF'}).value:'#FFFFFF';
+  const ecc=($('qrECC')||{value:'M'}).value;
+  const bc=$('qrCanvas');
+  try{new QRious({element:bc,value:data,size,foreground:fg,background:bg,level:ecc});}
+  catch(e){toast('Failed to generate QR','err');btn.disabled=false;btn.textContent='Generate QR Code';return;}
+  setTimeout(()=>{
+    buildFinalQR(bc,size,fg,bg,isPrem,()=>{
+      qrGenerated=true;
+      $('qrEmpty').style.display='none';
+      $('qrPreviewWrap').classList.add('has-qr');
+      $('dlBtn').disabled=false;$('saveBtn').disabled=false;
+      btn.disabled=false;btn.innerHTML='Generate QR Code';
+      toast('QR code generated!','ok');
+    });
+  },100);
+}
+
+function buildFinalQR(bc,size,fg,bg,isPrem,cb){
+  const out=$('qrOutput');
+  const fh=(isPrem&&qrFrame>=2)?44:0;
+  out.width=size;out.height=size+fh;
+  const ctx=out.getContext('2d');
+  ctx.fillStyle=bg;ctx.fillRect(0,0,out.width,out.height);
+  if(isPrem&&(qrShape==='dots'||qrShape==='rounded')){
+    applyShape(ctx,bc,size,fg,bg,()=>{
+      if(isPrem)applyFrame(ctx,qrFrame,size,fh);
+      applyLogo(ctx,size,()=>{out.style.display='block';bc.style.display='none';cb();});
+    });
+  } else {
+    ctx.drawImage(bc,0,0);
+    if(isPrem)applyFrame(ctx,qrFrame,size,fh);
+    applyLogo(ctx,size,()=>{out.style.display='block';bc.style.display='none';cb();});
+  }
+}
+
+function applyShape(ctx,bc,size,fg,bg,cb){
+  const mz=Math.round(size/37);
+  const tmp=document.createElement('canvas');tmp.width=size;tmp.height=size;
+  const tc=tmp.getContext('2d');tc.drawImage(bc,0,0);
+  const id=tc.getImageData(0,0,size,size);
+  ctx.fillStyle=bg;ctx.fillRect(0,0,size,size);
+  for(let y=0;y<size;y+=mz){
+    for(let x=0;x<size;x+=mz){
+      if(id.data[(y*size+x)*4]<128){
+        ctx.fillStyle=fg;
+        if(qrShape==='dots'){ctx.beginPath();ctx.arc(x+mz/2,y+mz/2,mz*.42,0,Math.PI*2);ctx.fill();}
+        else{const r=mz*.32;ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+mz-r,y);ctx.quadraticCurveTo(x+mz,y,x+mz,y+r);ctx.lineTo(x+mz,y+mz-r);ctx.quadraticCurveTo(x+mz,y+mz,x+mz-r,y+mz);ctx.lineTo(x+r,y+mz);ctx.quadraticCurveTo(x,y+mz,x,y+mz-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();ctx.fill();}
+      }
+    }
+  }
+  cb();
+}
+
+function applyFrame(ctx,frame,size,fh){
+  if(!frame)return;
+  if(frame===1){
+    ctx.strokeStyle='#F97316';ctx.lineWidth=8;ctx.lineCap='square';
+    const b=28,p=5;
+    [[p,p,b,0,0,b],[size-p-b,p,b,0,b,b],[p,size-p-b,0,b,b,b],[size-p-b,size-p-b,b,b,0,b]].forEach(([x,y])=>{
+      ctx.beginPath();ctx.moveTo(x,y+b);ctx.lineTo(x,y);ctx.lineTo(x+b,y);ctx.stroke();
+    });
+  }else if(frame===2){
+    ctx.fillStyle='#F97316';ctx.fillRect(0,size,size,fh);
+    ctx.fillStyle='#fff';ctx.font='bold 15px Plus Jakarta Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('SCAN ME',size/2,size+fh/2);
+    ctx.strokeStyle='#F97316';ctx.lineWidth=5;ctx.strokeRect(3,3,size-6,size-6);
+  }else if(frame===3){
+    ctx.fillStyle='#1E293B';ctx.fillRect(0,size,size,fh);
+    ctx.fillStyle='#fff';ctx.font='bold 13px Plus Jakarta Sans,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('SCAN TO VISIT',size/2,size+fh/2);
+    ctx.strokeStyle='#1E293B';ctx.lineWidth=6;ctx.strokeRect(3,3,size-6,size-6);
+  }else if(frame===4){
+    ctx.strokeStyle='#10B981';ctx.lineWidth=7;ctx.strokeRect(4,4,size-8,size-8);
+    const n=14;
+    [[4,4],[size-4-n,4],[4,size-4-n],[size-4-n,size-4-n]].forEach(([bx,by])=>{
+      ctx.fillStyle='#10B981';ctx.fillRect(bx,by,n,3);ctx.fillRect(bx,by,3,n);
+    });
+  }
+}
+
+function applyLogo(ctx,size,cb){
+  if(UD?.plan!=='premium'){cb();return;}
+  const li=$('qrLogo');if(!li?.files?.[0]){cb();return;}
+  const r=new FileReader();
+  r.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{const ls=size*.22,x=(size-ls)/2,y=(size-ls)/2,p=6;ctx.fillStyle='#fff';ctx.fillRect(x-p,y-p,ls+p*2,ls+p*2);ctx.drawImage(img,x,y,ls,ls);cb();};
+    img.onerror=cb;img.src=e.target.result;
+  };
+  r.onerror=cb;r.readAsDataURL(li.files[0]);
+}
+
+function setShape(s,el){qrShape=s;document.querySelectorAll('.sopt').forEach(e=>e.classList.remove('active'));if(el)el.classList.add('active');}
+function setFrame(f,el){qrFrame=f;document.querySelectorAll('.fopt').forEach(e=>e.classList.remove('active'));if(el)el.classList.add('active');}
+
+function downloadQR(){
+  if(!qrGenerated){toast('Generate a QR code first','err');return;}
+  const out=$('qrOutput'),bc=$('qrCanvas');
+  const c=(out?.style.display!=='none')?out:bc;
+  if(!c)return;
+  const a=document.createElement('a');
+  a.download='trisend-qr-'+Date.now()+'.png';
+  a.href=c.toDataURL('image/png');a.click();
+  toast('QR Code downloaded!','ok');
+}
+
+async function saveQR(){
+  if(!CU||!qrGenerated){toast('Generate a QR code first','err');return;}
+  const data=getQRData();if(!data)return;
+  const isPrem=UD?.plan==='premium';
+  const doSave=()=>{
+    db.collection('qrcodes').add({
+      userId:CU.uid,type:qrType,data,label:data.slice(0,50),scans:0,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    }).then(()=>{toast('QR Code saved!','ok');loadStats();})
+    .catch(()=>toast('Failed to save','err'));
+  };
+  if(!isPrem){
+    const snap=await db.collection('qrcodes').where('userId','==',CU.uid).get();
+    if(snap.size>=10){toast('Free plan limit: 10 QR codes. Upgrade for unlimited!','err');showPanel('upgrade');return;}
+  }
+  doSave();
+}
+
+function unlockPremium(){
+  ['pfColors','pfShape','pfFrame','pfLogo','pfAlias','pfExpiry','pfLinkPwd'].forEach(id=>{
+    const e=$(id);if(e)e.classList.remove('locked');
+  });
+  [$('qrFg'),$('qrBg'),$('qrLogo')].forEach(e=>{if(e)e.disabled=false;});
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+async function loadNotifications(){
+  if(!CU)return;
+  try{
+    const [notifSnap,readSnap]=await Promise.all([
+      db.collection('notifications').orderBy('createdAt','desc').limit(30).get(),
+      db.collection('user_reads').doc(CU.uid).get()
+    ]);
+    const plan=UD?.plan||'free';
+    const readIds=readSnap.exists?(readSnap.data().ids||[]):[];
+    const all=[];
+    notifSnap.forEach(d=>all.push(Object.assign({id:d.id},d.data())));
+    const filtered=all.filter(n=>!n.target||n.target==='all'||n.target===plan);
+    const unread=filtered.filter(n=>!readIds.includes(n.id)).length;
+
+    const badge=$('nBadge');
+    const bell=$('bellBtn');
+    if(unread>0){
+      if(badge){badge.textContent=unread;badge.classList.remove('hidden');}
+      if(bell&&!bell.querySelector('.ndot')){const d=document.createElement('div');d.className='ndot';bell.appendChild(d);}
+    } else {
+      if(badge)badge.classList.add('hidden');
+      if(bell){const dd=bell.querySelector('.ndot');if(dd)dd.remove();}
+    }
+
+    const el=$('notifList');if(!el)return;
+    if(!filtered.length){el.innerHTML='<div class="empty-s"><p>No notifications yet</p></div>';return;}
+    el.innerHTML=filtered.map(n=>{
+      const u=!readIds.includes(n.id);
+      return `<div class="ncard${u?' unread':''}" data-nid="${n.id}">
+        <div class="ndotc${u?' unread':''}"></div>
+        <div><h4>${n.title}</h4><p>${n.message}</p><div class="ntime">${timeAgo(n.createdAt)}</div></div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-nid]').forEach(card=>card.addEventListener('click',()=>markRead(card.getAttribute('data-nid'))));
+  }catch(e){console.error('Notif error:',e);}
+}
+
+function markRead(id){
+  if(!CU)return;
+  db.collection('user_reads').doc(CU.uid).set(
+    {ids:firebase.firestore.FieldValue.arrayUnion(id)},{merge:true}
+  ).then(()=>loadNotifications());
+}
+
+// ── AI Chat ───────────────────────────────────────────────────────────────────
+const AI_KB=[
+  {p:['hello','hi','hey'],r:"Hi! I'm Trisend AI. Ask me about QR codes, short links, analytics, or your plan!"},
+  {p:['premium','upgrade','price','2000','cost'],r:"<strong>Trisend Premium</strong> is a one-time ₦2,000 — lifetime access forever!<br><br>Includes: Unlimited QR codes & links, custom colors/shapes/frames, logo embed, link expiry, passwords, advanced analytics and CSV export."},
+  {p:['qr','generate','code'],r:"To create a QR code:<br>1. Click <strong>QR Generator</strong> in sidebar<br>2. Choose type (URL, WiFi, vCard, etc.)<br>3. Fill in the details<br>4. Click <strong>Generate</strong><br>5. Download or Save to account"},
+  {p:['short','link','shorten','url'],r:"To shorten a link:<br>1. Click <strong>Short Links</strong> in sidebar<br>2. Paste your long URL<br>3. Click <strong>Shorten Link</strong><br>4. Copy and share!<br><br>Every click is tracked with device & location data."},
+  {p:['analytics','stats','clicks','country','data'],r:"Analytics shows real-time data:<br>• Device & browser breakdown<br>• Country stats from IP geolocation<br>• 7-day click chart<br>• QR scan count<br>• CSV export (Premium)"},
+  {p:['free','limit','plan'],r:"Free plan includes: 10 QR codes, 20 short links, real-time analytics, all 8 QR types. Upgrade to Premium for unlimited everything — just ₦2,000 once!"},
+  {p:['support','help','contact','bug','issue'],r:"Need help? Email: <strong>trisendmailer@gmail.com</strong><br>Report bugs: Settings → Report a Bug"},
+];
+function sendChat(){
+  const inp=$('chatInput');const msg=inp.value.trim();if(!msg)return;inp.value='';
+  const msgs=$('chatMsgs');
+  const u=document.createElement('div');u.className='bubble user';u.textContent=msg;msgs.appendChild(u);msgs.scrollTop=msgs.scrollHeight;
+  const lower=msg.toLowerCase();
+  let resp='Great question! I can help with: QR codes, short links, analytics, pricing, or premium features.';
+  for(const kb of AI_KB){if(kb.p.some(kw=>lower.includes(kw))){resp=kb.r;break;}}
+  setTimeout(()=>{
+    const b=document.createElement('div');b.className='bubble bot';b.innerHTML=resp;
+    msgs.appendChild(b);msgs.scrollTop=msgs.scrollHeight;
+  },700);
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function renderPlanInfo(){
+  const isPrem=UD?.plan==='premium';
+  if($('planInfo'))$('planInfo').innerHTML=isPrem
+    ?'<div style="background:linear-gradient(135deg,var(--orl),var(--bl));border:1.5px solid rgba(249,115,22,.2);border-radius:10px;padding:14px;"><div style="font-size:17px;font-weight:900;margin-bottom:2px;">⭐ Premium</div><p style="font-size:12.5px;color:var(--text2);">Lifetime access · All features unlocked</p></div>'
+    :'<div style="background:var(--bg3);border-radius:10px;padding:14px;"><div style="font-size:15px;font-weight:800;margin-bottom:2px;">Free Plan</div><p style="font-size:12.5px;color:var(--text2);">10 QR codes · 20 short links · Basic analytics</p></div>';
+  if($('planCTA'))$('planCTA').innerHTML=isPrem?'':`<button class="btn bp bfull" onclick="showPanel('upgrade')">Upgrade to Premium →</button>`;
+}
+
+function saveName(){
+  const name=$('stName').value.trim();if(!name){toast('Enter a name','err');return;}
+  CU.updateProfile({displayName:name})
+    .then(()=>db.collection('users').doc(CU.uid).update({displayName:name}))
+    .then(()=>{UD.displayName=name;$('sName').textContent=name;toast('Profile updated!','ok');})
+    .catch(()=>toast('Update failed','err'));
+}
+
+function changePass(){
+  const p=$('stNewPass').value;
+  if(!p||p.length<8){toast('Password must be at least 8 characters','err');return;}
+  CU.updatePassword(p)
+    .then(()=>{$('stNewPass').value='';toast('Password updated!','ok');})
+    .catch(e=>{
+      if(e.code==='auth/requires-recent-login')toast('Please log out and back in, then try again','inf');
+      else toast('Failed to update password','err');
+    });
+}
+
+function deleteAccount(){
+  if(!confirm('Delete account? All your data will be permanently lost.'))return;
+  if(!confirm('Last chance — are you sure?'))return;
+  db.collection('users').doc(CU.uid).delete()
+    .then(()=>CU.delete())
+    .then(()=>window.location.href='/')
+    .catch(()=>toast('Please log out and back in, then try again','inf'));
+}
+
+function submitBug(){
+  const t=$('bugTitle').value.trim(),d=$('bugDesc').value.trim();
+  if(!t||!d){toast('Please fill all fields','err');return;}
+  db.collection('bugs').add({
+    userId:CU.uid,email:CU.email,title:t,description:d,status:'open',
+    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{$('bugTitle').value='';$('bugDesc').value='';toast('Bug reported! We will fix it ASAP ','ok');})
+  .catch(()=>toast('Failed','err'));
+}
+
+// ── Paystack — multi-currency ─────────────────────────────────────────────────
+// Stores the geo result so we don't re-fetch on every click
+let _geoCache = null;
+
+async function loadUpgradePanel(){
+  // Only fetch once per session
+  if(_geoCache){
+    renderUpgradePanel(_geoCache);
+    return;
+  }
+  try{
+    const res = await fetch('/api/location');
+    _geoCache  = await res.json();
+  }catch(e){
+    // Fallback to NGN on network error
+    _geoCache = {countryCode:'NG',country:'Nigeria',currency:'NGN',amount:200000,display:'₦2,000',isNigeria:true};
+  }
+  renderUpgradePanel(_geoCache);
+}
+
+function renderUpgradePanel(geo){
+  const loading  = $('upLoading');
+  const content  = $('upContent');
+  const priceTag = $('upPriceTag');
+  const badge    = $('upRegionBadge');
+  const payBtn   = $('upPayBtn');
+  const payNote  = $('upPayNote');
+
+  if(loading) loading.style.display='none';
+  if(content) content.style.display='block';
+
+  // Price
+  if(priceTag) priceTag.textContent = geo.display;
+
+  // Region badge
+  if(badge){
+    const flag = geo.isNigeria ? '🇳🇬' : '🌍';
+    badge.innerHTML = `${flag} Pricing for <strong style="margin-left:3px;">${geo.country}</strong>`;
+  }
+
+  // Button label
+  if(payBtn) payBtn.textContent = `Pay ${geo.display} — Upgrade Now`;
+
+  // Payment note
+  if(payNote){
+    payNote.innerHTML = geo.isNigeria
+      ? '🔒 Secured by Paystack · Card, Bank Transfer, USSD'
+      : '🔒 Secured by Paystack · International Visa & Mastercard accepted';
+  }
+}
+
+async function doPaystack(){
+  if(!CU){toast('Please log in first','err');return;}
+  if(UD?.plan==='premium'){toast('You already have Premium!','ok');return;}
+  if(typeof PaystackPop==='undefined'){toast('Payment system not loaded. Please refresh.','err');return;}
+  // If key still empty, try fetching again
+  if(!PAYSTACK_PK){
+    await loadConfig();
+    if(!PAYSTACK_PK){toast('Payment config not loaded. Please refresh.','err');return;}
+  }
+
+  // Use geo-detected currency & amount, fallback to NGN
+  const geo      = _geoCache || {currency:'NGN',amount:200000,display:'₦2,000'};
+  const currency = geo.currency;
+  const amount   = geo.amount;
+
+  const handler=PaystackPop.setup({
+    key:PAYSTACK_PK,
+    email:CU.email,
+    amount,
+    currency,
+    ref:'TRISEND-'+Date.now()+'-'+CU.uid.slice(0,8),
+    metadata:{userId:CU.uid,email:CU.email,currency,country:geo.country||''},
+    callback:response=>{
+      toast('Payment received! Activating…','inf');
+      fetch('/api/verify-payment',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({reference:response.reference,userId:CU.uid})
+      }).then(r=>r.json())
+        .then(data=>{
+          if(!data.success){toast('Verification failed: '+data.message,'err');return;}
+          upgradeToPremium(response.reference);
+        })
+        .catch(()=>upgradeToPremium(response.reference));
+    },
+    onClose:()=>toast('Payment cancelled','inf')
+  });
+  handler.openIframe();
+}
+
+function upgradeToPremium(ref){
+  db.collection('users').doc(CU.uid).update({
+    plan:'premium',paystackRef:ref,
+    upgradedAt:firebase.firestore.FieldValue.serverTimestamp()
+  }).then(()=>{
+    UD.plan='premium';
+    toast('Welcome to Premium! All features unlocked! 🎉','ok');
+    unlockPremium();
+    $('upStrip').classList.add('hidden');
+    $('upNav').classList.add('hidden');
+    $('sPill').className='ppill premium';$('sPill').textContent='Premium';
+    renderPlanInfo();
+    showPanel('home');
+  }).catch(()=>toast('Payment done but upgrade failed. Email trisendmailer@gmail.com with ref: '+ref,'err'));
+}
+
+// ── CSV Export ────────────────────────────────────────────────────────────────
+function exportCSV(){
+  if(!CU)return;
+  db.collection('shortlinks').where('userId','==',CU.uid).get().then(snap=>{
+    const rows=[['Code','Original URL','Short URL','Clicks','Created']];
+    snap.forEach(d=>{
+      const r=d.data();
+      rows.push([r.code,r.originalUrl,window.location.origin+'/'+r.code,r.clicks||0,
+        r.createdAt?.toDate?r.createdAt.toDate().toLocaleDateString():'']);
+    });
+    const csv=rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\n');
+    const a=document.createElement('a');
+    a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+    a.download='trisend-analytics.csv';a.click();
+    toast('CSV exported!','ok');
+  });
+}
+</script>
+</body>
+</html>
