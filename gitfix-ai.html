@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;"/>
+<title>GitFix AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js" crossorigin="anonymous"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:#070a10;color:#e2e8f0;font-family:'Inter',sans-serif;min-height:100vh;}
+  ::-webkit-scrollbar{width:5px;height:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#1e2d3d;border-radius:4px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+const SEV = { low:"#4ade80", medium:"#fbbf24", high:"#f97316", critical:"#f87171" };
+const LANGC = { JavaScript:"#f7df1e",TypeScript:"#3178c6",Python:"#3572A5",HTML:"#e34c26",CSS:"#563d7c",Go:"#00add8",Rust:"#dea584",Java:"#b07219","C++":"#f34b7d",PHP:"#4F5D95",Ruby:"#701516",Swift:"#f05138",Kotlin:"#a97bff",Vue:"#42b883",default:"#475569" };
+const EXT_ICON = {js:"🟨",ts:"🔷",jsx:"🟦",tsx:"🔷",py:"🐍",html:"🌐",css:"🎨",json:"📋",md:"📝",go:"🐹",rs:"🦀",java:"☕",php:"🐘",rb:"💎",vue:"💚",svg:"🖼️",sh:"⚙️",gitignore:"🙈",env:"🔒"};
+
+function getIcon(p){const e=p.split(".").pop()?.toLowerCase();return EXT_ICON[e]||"📄";}
+function getLangDot(l){return LANGC[l]||LANGC.default;}
+function timeAgo(d){const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return"just now";if(s<3600)return`${Math.floor(s/60)}m ago`;if(s<86400)return`${Math.floor(s/3600)}h ago`;return`${Math.floor(s/86400)}d ago`;}
+function sevRank(s){return{critical:4,high:3,medium:2,low:1}[s]||0;}
+
+const CHUNK=400;
+
+// ── GitHub helper (CORS-safe) ──
+async function ghFetch(url, token, opts={}) {
+  const headers = {
+    "Authorization": `token ${token.trim()}`,
+    "Accept": "application/vnd.github.v3+json",
+    "Content-Type": "application/json",
+    ...opts.headers
+  };
+  const res = await fetch(url, { ...opts, headers, mode:"cors" });
+  return res;
+}
+
+// ── AI chunk analysis ──
+async function analyzeChunk(lines, start, idx, total) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body: JSON.stringify({
+      model:"claude-sonnet-4-20250514", max_tokens:4096,
+      messages:[{role:"user",content:`Analyze chunk ${idx+1}/${total}, lines ${start+1}–${start+lines.length}. Find ALL bugs, security issues, performance problems, bad practices.
+Return ONLY valid JSON, no markdown fences, no extra text:
+{"severity":"low|medium|high|critical","bugs":[{"line":<abs line number>,"description":"issue description","original":"exact problematic code line","fixed":"corrected line"}]}
+If no issues: {"severity":"low","bugs":[]}
+Code (starts at line ${start+1}):
+${lines.join("\n")}`}]
+    })
+  });
+  if(!res.ok) {
+    const e = await res.json().catch(()=>({}));
+    throw new Error(`AI API error ${res.status}: ${e?.error?.message||"unknown"}`);
+  }
+  const d = await res.json();
+  const t = d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
+  const clean = t.replace(/```json\n?|```\n?/g,"").trim();
+  return JSON.parse(clean);
+}
+
+function applyPatches(origLines, bugs) {
+  const p=[...origLines], applied=[];
+  bugs.forEach(bug=>{
+    if(!bug.original||!bug.fixed) return;
+    const tl=(bug.line||1)-1;
+    for(let i=Math.max(0,tl-20);i<=Math.min(p.length-1,tl+20);i++){
+      if(p[i]?.trim()===bug.original?.trim()){
+        p[i]=p[i].replace(p[i].trim(),bug.fixed.trim());
+        applied.push({...bug,lineNum:i+1}); break;
+      }
+    }
+  });
+  return{patched:p,applied};
+}
+
+// ─────────────────────────────────────────
+function App() {
+  const [token,setToken]=useState("");
+  const [connected,setConnected]=useState(false);
+  const [user,setUser]=useState(null);
+  const [repos,setRepos]=useState([]);
+  const [screen,setScreen]=useState("repos"); // repos | files | action
+  const [selRepo,setSelRepo]=useState(null);
+  const [fileTree,setFileTree]=useState([]);
+  const [fileQ,setFileQ]=useState("");
+  const [selFile,setSelFile]=useState(null);
+  const [mode,setMode]=useState("analyze");
+  const [code,setCode]=useState("");
+  const [sha,setSha]=useState("");
+  const [bugs,setBugs]=useState([]);
+  const [severity,setSeverity]=useState("low");
+  const [patched,setPatched]=useState("");
+  const [patches,setPatches]=useState([]);
+  const [showFixed,setShowFixed]=useState(false);
+  const [analyzing,setAnalyzing]=useState(false);
+  const [chunksTotal,setChunksTotal]=useState(0);
+  const [chunksDone,setChunksDone]=useState(0);
+  const [upCode,setUpCode]=useState("");
+  const [upName,setUpName]=useState("");
+  const [commit,setCommit]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [loadMsg,setLoadMsg]=useState("");
+  const [err,setErr]=useState("");
+  const [step,setStep]=useState("idle");
+  const [debugInfo,setDebugInfo]=useState("");
+  const abortRef=useRef(false);
+  const fileRef=useRef();
+
+  function resetA(){setCode("");setSha("");setBugs([]);setSeverity("low");setPatched("");setPatches([]);setShowFixed(false);setChunksDone(0);setChunksTotal(0);setAnalyzing(false);abortRef.current=false;setErr("");}
+
+  // ── Connect ──
+  async function connect() {
+    const t = token.trim();
+    if(!t){setErr("Paste your GitHub token first.");return;}
+    if(!t.startsWith("ghp_")&&!t.startsWith("github_pat_")){
+      setErr("Token should start with ghp_ or github_pat_ — make sure you copied the whole token.");return;
+    }
+    setErr("");setDebugInfo("");setLoading(true);setLoadMsg("Connecting to GitHub…");
+    try {
+      const res = await ghFetch("https://api.github.com/user", t);
+      if(res.status===401){throw new Error("Token rejected (401) — it may be expired or missing repo scope. Generate a new one.");}
+      if(res.status===403){throw new Error("Token forbidden (403) — check that repo scope is enabled.");}
+      if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(`GitHub error ${res.status}: ${e.message||"unknown"}`);}
+      const ud=await res.json();
+      setUser(ud);
+      // Load repos
+      setLoadMsg("Loading your repositories…");
+      let all=[];
+      for(let pg=1;pg<=4;pg++){
+        const r=await ghFetch(`https://api.github.com/user/repos?per_page=50&page=${pg}&sort=pushed`,t);
+        const rd=await r.json();
+        all=[...all,...rd];
+        if(rd.length<50)break;
+      }
+      setRepos(all);
+      setConnected(true);setScreen("repos");
+    } catch(e) {
+      let msg = e.message;
+      if(msg==="Failed to fetch"||msg.includes("NetworkError")||msg.includes("network")){
+        msg="Network error: Could not reach GitHub API.\n\n• Check your internet connection\n• Try disabling any VPN or ad blocker\n• Make sure the token has no extra spaces";
+      }
+      setErr(msg);
+      setDebugInfo(`Token prefix: ${token.trim().substring(0,8)}... | Length: ${token.trim().length} chars`);
+    }
+    setLoading(false);setLoadMsg("");
+  }
+
+  // ── Pick repo → load files ──
+  async function pickRepo(repo) {
+    setSelRepo(repo);setSelFile(null);setFileTree([]);setFileQ("");resetA();
+    setLoading(true);setLoadMsg(`Loading ${repo.name}…`);
+    try{
+      const branch=repo.default_branch||"main";
+      const r=await ghFetch(`https://api.github.com/repos/${repo.full_name}/git/trees/${branch}?recursive=1`,token);
+      const td=await r.json();
+      setFileTree((td.tree||[]).filter(f=>f.type==="blob"));
+      setScreen("files");
+    }catch(e){setErr("Could not load files: "+e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  function pickFile(f){setSelFile(f);resetA();setUpCode("");setUpName("");setCommit("");setStep("idle");setMode("analyze");setScreen("action");}
+
+  // ── Fetch file ──
+  async function fetchFile(){
+    setErr("");setLoading(true);setLoadMsg("Fetching file…");
+    try{
+      const r=await ghFetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,token);
+      if(!r.ok){const e=await r.json();throw new Error(e.message);}
+      const d=await r.json();
+      const dec=decodeURIComponent(escape(atob(d.content.replace(/\n/g,""))));
+      setCode(dec);setSha(d.sha);setStep("fetched");
+    }catch(e){setErr(e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  // ── AI Analysis ──
+  async function analyze(){
+    setErr("");setBugs([]);setSeverity("low");setPatched("");setPatches([]);
+    setAnalyzing(true);abortRef.current=false;setStep("analyzing");
+    const lines=code.split("\n");
+    const chunks=[];
+    for(let i=0;i<lines.length;i+=CHUNK) chunks.push({lines:lines.slice(i,i+CHUNK),start:i});
+    setChunksTotal(chunks.length);setChunksDone(0);
+    const collected=[];let worst="low";
+    try{
+      for(let i=0;i<chunks.length;i++){
+        if(abortRef.current)break;
+        const res=await analyzeChunk(chunks[i].lines,chunks[i].start,i,chunks.length);
+        const b=(res.bugs||[]).map(b=>({...b,chunkIdx:i}));
+        collected.push(...b);
+        if(sevRank(res.severity)>sevRank(worst))worst=res.severity;
+        setChunksDone(i+1);setBugs([...collected]);setSeverity(worst);
+        if(i<chunks.length-1)await new Promise(r=>setTimeout(r,250));
+      }
+      const{patched:p,applied:a}=applyPatches(lines,collected);
+      setPatched(p.join("\n"));setPatches(a);setStep("analyzed");
+    }catch(e){setErr("AI error: "+e.message);setStep(collected.length>0?"analyzed":"fetched");}
+    setAnalyzing(false);
+  }
+
+  function stopAnalyze(){
+    abortRef.current=true;setAnalyzing(false);
+    if(bugs.length>0){const l=code.split("\n");const{patched:p,applied:a}=applyPatches(l,bugs);setPatched(p.join("\n"));setPatches(a);}
+    setStep(bugs.length>0?"analyzed":"fetched");
+  }
+
+  // ── Push ──
+  async function push(pushCode){
+    if(!commit.trim()){setErr("Enter a commit message.");return;}
+    setErr("");setLoading(true);setLoadMsg("Pushing to GitHub…");
+    try{
+      let s=sha;
+      if(!s){const r=await ghFetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,token);if(r.ok){const d=await r.json();s=d.sha;}}
+      const enc=btoa(unescape(encodeURIComponent(pushCode)));
+      const body={message:commit,content:enc};if(s)body.sha=s;
+      const r=await ghFetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,token,{method:"PUT",body:JSON.stringify(body)});
+      if(!r.ok){const e=await r.json();throw new Error(e.message);}
+      setStep("pushed");
+    }catch(e){setErr(e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  function handleUpload(e){const f=e.target.files[0];if(!f)return;setUpName(f.name);const r=new FileReader();r.onload=ev=>setUpCode(ev.target.result);r.readAsText(f);}
+
+  const filtered=fileTree.filter(f=>f.path.toLowerCase().includes(fileQ.toLowerCase()));
+  const lineCount=code?code.split("\n").length:0;
+  const pct=chunksTotal>0?Math.round((chunksDone/chunksTotal)*100):0;
+
+  // ── Styles ──
+  const c = {
+    card:{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,padding:22,marginBottom:14},
+    input:{width:"100%",background:"#080e1c",border:"1px solid #1e2d3d",borderRadius:10,padding:"13px 16px",fontFamily:"'JetBrains Mono',monospace",fontSize:"0.85rem",color:"#e2e8f0",outline:"none",transition:"border-color .2s"},
+    btnCyan:{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:8,padding:"13px 24px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.85rem",fontWeight:700,cursor:"pointer",border:"none",background:"#22d3ee",color:"#000",width:"100%"},
+    btnGhost:{display:"inline-flex",alignItems:"center",gap:7,padding:"10px 20px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.78rem",fontWeight:600,cursor:"pointer",background:"transparent",color:"#475569",border:"1px solid #1e2d3d"},
+    btnGreen:{display:"inline-flex",alignItems:"center",gap:7,padding:"11px 22px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",fontWeight:700,cursor:"pointer",border:"none",background:"#4ade80",color:"#000"},
+    btnOrange:{display:"inline-flex",alignItems:"center",gap:8,padding:"9px 18px",borderRadius:8,fontFamily:"'Inter',sans-serif",fontSize:"0.75rem",fontWeight:600,cursor:"pointer",border:"none",background:"#f97316",color:"#000"},
+    errBox:{background:"rgba(248,113,113,0.06)",border:"1px solid rgba(248,113,113,0.25)",borderRadius:12,padding:"14px 16px",fontSize:"0.78rem",color:"#f87171",marginTop:14,lineHeight:1.6,whiteSpace:"pre-wrap"},
+    codeBox:{background:"#040710",border:"1px solid #1e2d3d",borderRadius:10,overflow:"hidden",marginTop:12},
+    codeBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#0d1526",borderBottom:"1px solid #1e2d3d"},
+    pre:{padding:16,fontFamily:"'JetBrains Mono',monospace",fontSize:"0.72rem",color:"#7dd3fc",lineHeight:1.75,whiteSpace:"pre",overflow:"auto",maxHeight:300},
+    commitRow:{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"},
+    commitInput:{flex:1,minWidth:200,background:"#080e1c",border:"1px solid #1e2d3d",borderRadius:10,padding:"11px 16px",fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",color:"#e2e8f0",outline:"none"},
+  };
+
+  return (
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#070a10",minHeight:"100vh",color:"#e2e8f0"}}>
+
+      {/* Topbar */}
+      <div style={{display:"flex",alignItems:"center",gap:14,padding:"14px 20px",borderBottom:"1px solid #0f1e30",background:"#070a10",position:"sticky",top:0,zIndex:50}}>
+        <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.25rem",fontWeight:800,letterSpacing:"-0.5px"}}>
+          Git<span style={{color:"#22d3ee"}}>Fix</span> AI
+        </div>
+        {connected && (
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+            {user?.avatar_url && <img src={user.avatar_url} style={{width:28,height:28,borderRadius:"50%",border:"2px solid rgba(34,211,238,0.4)"}} alt=""/>}
+            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.7rem",color:"#475569"}}>@{user?.login}</span>
+            <button style={{...c.btnGhost,padding:"6px 12px",fontSize:"0.7rem",color:"#f87171",borderColor:"rgba(248,113,113,0.2)"}} onClick={()=>{setConnected(false);setUser(null);setRepos([]);setToken("");setScreen("repos");setSelRepo(null);setSelFile(null);setFileTree([]);resetA();}}>
+              Disconnect
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Breadcrumb */}
+      {connected && (
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 20px",fontSize:"0.72rem",color:"#334155",borderBottom:"1px solid #0f1e30",flexWrap:"wrap"}}>
+          <span style={{cursor:"pointer",color:screen==="repos"?"#22d3ee":"#334155"}} onClick={()=>{setScreen("repos");setSelRepo(null);setSelFile(null);resetA();}}>🏠 Repos</span>
+          {selRepo&&<><span style={{color:"#1e2d3d"}}>›</span><span style={{cursor:"pointer",color:screen==="files"?"#22d3ee":"#334155"}} onClick={()=>{setScreen("files");setSelFile(null);resetA();setStep("idle");}}>{selRepo.name}</span></>}
+          {selFile&&<><span style={{color:"#1e2d3d"}}>›</span><span style={{color:"#e2e8f0"}}>{selFile.path.split("/").pop()}</span></>}
+        </div>
+      )}
+
+      <div style={{padding:20,maxWidth:960,margin:"0 auto"}}>
+
+        {/* ═══ CONNECT ═══ */}
+        {!connected && (
+          <div style={{maxWidth:440,margin:"48px auto"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.9rem",fontWeight:800,marginBottom:6}}>Git<span style={{color:"#22d3ee"}}>Fix</span> AI</div>
+            <div style={{fontSize:"0.8rem",color:"#475569",marginBottom:28,lineHeight:1.7}}>Connect your GitHub account to browse repos, analyze code with AI, and push fixes directly.</div>
+            <div style={c.card}>
+              <label style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.6rem",textTransform:"uppercase",letterSpacing:2,color:"#475569",marginBottom:8,display:"block"}}>
+                GitHub Personal Access Token
+              </label>
+              <input
+                style={{...c.input,marginBottom:14}}
+                type="password"
+                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                value={token}
+                onChange={e=>setToken(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&connect()}
+              />
+              <button style={c.btnCyan} onClick={connect} disabled={loading}>
+                {loading ? <><div style={{width:16,height:16,border:"2px solid rgba(0,0,0,0.3)",borderTopColor:"#000",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>{loadMsg}</> : "Connect GitHub →"}
+              </button>
+              <div style={{marginTop:14,padding:"12px 14px",background:"#080e1c",borderRadius:10,border:"1px solid #1e2d3d"}}>
+                <div style={{fontSize:"0.68rem",color:"#475569",lineHeight:1.8}}>
+                  <strong style={{color:"#94a3b8",display:"block",marginBottom:4}}>How to get a token:</strong>
+                  1. Go to <strong style={{color:"#22d3ee"}}>github.com/settings/tokens</strong><br/>
+                  2. Click <strong style={{color:"#e2e8f0"}}>"Generate new token (classic)"</strong><br/>
+                  3. Check the <strong style={{color:"#e2e8f0"}}>repo</strong> checkbox<br/>
+                  4. Click Generate → Copy the <strong style={{color:"#e2e8f0"}}>ghp_...</strong> token
+                </div>
+              </div>
+            </div>
+            {err && (
+              <div style={c.errBox}>
+                ⚠ {err}
+                {debugInfo && <div style={{marginTop:8,fontSize:"0.65rem",color:"#475569",fontFamily:"'JetBrains Mono',monospace"}}>{debugInfo}</div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && connected && (
+          <div style={c.card}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:18,height:18,border:"2px solid #1e2d3d",borderTopColor:"#22d3ee",borderRadius:"50%",animation:"spin .7s linear infinite",flexShrink:0}}/>
+              <span style={{fontSize:"0.8rem",color:"#475569"}}>{loadMsg}</span>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ REPOS ═══ */}
+        {connected && !loading && screen==="repos" && (
+          <>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:800}}>Your Repositories</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.65rem",color:"#475569",background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:20,padding:"3px 12px"}}>{repos.length} repos</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(270px,1fr))",gap:12}}>
+              {repos.map(repo=>(
+                <div key={repo.id} onClick={()=>pickRepo(repo)}
+                  style={{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,padding:20,cursor:"pointer",position:"relative",transition:"all .2s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="#22d3ee50";e.currentTarget.style.transform="translateY(-1px)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="#1e2d3d";e.currentTarget.style.transform="translateY(0)";}}>
+                  <div style={{fontWeight:700,fontSize:"0.95rem",marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:150}}>{repo.name}</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.55rem",padding:"2px 7px",borderRadius:4,flexShrink:0,...(repo.private?{background:"rgba(251,191,36,.1)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.2)"}:{background:"rgba(74,222,128,.08)",color:"#4ade80",border:"1px solid rgba(74,222,128,.15)"})}}>
+                      {repo.private?"private":"public"}
+                    </span>
+                  </div>
+                  <div style={{fontSize:"0.74rem",color:"#475569",lineHeight:1.5,marginBottom:12,minHeight:28,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>
+                    {repo.description||<span style={{color:"#1e2d3d"}}>No description</span>}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,fontSize:"0.67rem",color:"#334155",flexWrap:"wrap"}}>
+                    {repo.language&&<span><span style={{width:8,height:8,borderRadius:"50%",background:getLangDot(repo.language),display:"inline-block",marginRight:4,verticalAlign:"middle"}}></span>{repo.language}</span>}
+                    <span>⭐ {repo.stargazers_count}</span>
+                    <span>{timeAgo(repo.pushed_at)}</span>
+                  </div>
+                  <div style={{position:"absolute",right:16,top:"50%",transform:"translateY(-50%)",color:"#1e2d3d",fontSize:"1.1rem"}}>›</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ═══ FILES ═══ */}
+        {connected && !loading && screen==="files" && selRepo && (
+          <>
+            <div style={{...c.card,display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+              <div style={{fontSize:"1.8rem"}}>📁</div>
+              <div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1rem",fontWeight:800}}>{selRepo.name}</div>
+                <div style={{fontSize:"0.7rem",color:"#475569",marginTop:2}}>{fileTree.length} files · {selRepo.default_branch}</div>
+              </div>
+            </div>
+            <div style={{position:"relative",marginBottom:12}}>
+              <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",pointerEvents:"none"}}>🔍</span>
+              <input style={{...c.input,paddingLeft:42}} placeholder="Search files…" value={fileQ} onChange={e=>setFileQ(e.target.value)}/>
+            </div>
+            <div style={{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,overflow:"hidden"}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.65rem",color:"#334155",padding:"8px 18px",borderBottom:"1px solid #0f1e30"}}>
+                {filtered.length} of {fileTree.length} files
+              </div>
+              {filtered.length===0
+                ? <div style={{padding:32,textAlign:"center",fontSize:"0.78rem",color:"#2d3f55"}}>No files found</div>
+                : filtered.map((f,i)=>{
+                    const parts=f.path.split("/"),name=parts.pop(),dir=parts.join("/");
+                    const kb=f.size?(f.size/1024).toFixed(1)+" KB":"";
+                    return (
+                      <div key={i} onClick={()=>pickFile(f)}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",borderBottom:"1px solid #0f1e3010",fontSize:"0.82rem",transition:"background .12s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="rgba(34,211,238,.04)"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <span style={{fontSize:"1rem",flexShrink:0}}>{getIcon(f.path)}</span>
+                        <div style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          {dir&&<span style={{color:"#475569",fontSize:"0.7rem"}}>{dir}/</span>}
+                          <span style={{fontWeight:600}}>{name}</span>
+                        </div>
+                        {kb&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",color:"#334155",flexShrink:0}}>{kb}</span>}
+                        <span style={{color:"#334155",fontSize:"0.8rem"}}>›</span>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+            {err&&<div style={c.errBox}>⚠ {err}</div>}
+          </>
+        )}
+
+        {/* ═══ ACTION ═══ */}
+        {connected && !loading && screen==="action" && selFile && (
+          <>
+            <div style={c.card}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.8rem",color:"#22d3ee",marginBottom:6,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span>{getIcon(selFile.path)}</span><span>{selFile.path}</span>
+              </div>
+              <div style={{fontSize:"0.68rem",color:"#334155",display:"flex",gap:14,flexWrap:"wrap"}}>
+                {selFile.size&&<span>💾 {(selFile.size/1024).toFixed(1)} KB</span>}
+                {lineCount>0&&<span>📄 {lineCount.toLocaleString()} lines</span>}
+                {chunksTotal>0&&<span>🧩 {chunksTotal} chunks</span>}
+              </div>
+              {/* Mode tabs */}
+              <div style={{display:"flex",gap:3,background:"#080e1c",border:"1px solid #1e2d3d",borderRadius:10,padding:4,width:"fit-content",marginTop:14}}>
+                {[["analyze","🤖 Analyze & Fix"],["replace","↺ Replace File"]].map(([m,label])=>(
+                  <button key={m} onClick={()=>{setMode(m);setErr("");if(m==="replace"){setStep("idle");setUpCode("");setUpName("");}else setStep(code?"fetched":"idle");}}
+                    style={{padding:"9px 20px",fontFamily:"'Inter',sans-serif",fontSize:"0.75rem",fontWeight:600,border:"none",borderRadius:7,cursor:"pointer",transition:"all .18s",...(mode===m?{background:"#22d3ee",color:"#000"}:{background:"transparent",color:"#475569"})}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Fetch */}
+            {mode==="analyze" && step==="idle" && (
+              <div style={c.card}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:14}}>Fetch File</div>
+                <p style={{fontSize:"0.8rem",color:"#475569",marginBottom:16,lineHeight:1.7}}>Pull <strong style={{color:"#e2e8f0"}}>{selFile.path.split("/").pop()}</strong> and run AI analysis. Large files are split into {CHUNK}-line chunks — no size limit.</p>
+                <button style={{...c.btnCyan,width:"auto",padding:"11px 24px"}} onClick={fetchFile}>↓ Fetch File</button>
+              </div>
+            )}
+
+            {/* Code preview */}
+            {mode==="analyze" && (step==="fetched"||step==="analyzing"||step==="analyzed") && (
+              <div style={c.card}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:14}}>
+                  {step==="analyzed"?"Code Review":step==="analyzing"?"Analyzing…":"File Preview"}
+                </div>
+                {step==="analyzed"&&patched&&(
+                  <div style={{display:"flex",gap:4,marginBottom:10}}>
+                    {["Original","Patched"+(patches.length>0?` (${patches.length})` :"")].map((t,i)=>(
+                      <button key={i} onClick={()=>setShowFixed(i===1)}
+                        style={{padding:"6px 16px",borderRadius:7,fontSize:"0.68rem",fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",...(showFixed===(i===1)?{border:"1px solid #818cf8",color:"#818cf8",background:"rgba(129,140,248,.08)"}:{border:"1px solid #1e2d3d",background:"transparent",color:"#475569"})}}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={c.codeBox}>
+                  <div style={c.codeBar}>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",color:"#22d3ee"}}>{selFile.path.split("/").pop()}</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.6rem",color:"#2d3f55"}}>{lineCount.toLocaleString()} lines</span>
+                  </div>
+                  <pre style={c.pre}>{showFixed&&patched?patched:code}</pre>
+                </div>
+                {step==="fetched"&&(
+                  <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
+                    <button style={{...c.btnCyan,width:"auto",padding:"11px 24px"}} onClick={analyze}>🤖 Start AI Analysis</button>
+                    <button style={c.btnGhost} onClick={()=>{setStep("idle");setCode("");}}>← Back</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Progress */}
+            {step==="analyzing"&&(
+              <div style={c.card}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:14}}>AI Analysis in Progress</div>
+                <div style={{background:"#0f1e30",borderRadius:100,height:8,overflow:"hidden",marginBottom:8}}>
+                  <div style={{height:"100%",background:"linear-gradient(90deg,#22d3ee,#818cf8)",borderRadius:100,width:`${pct}%`,transition:"width .3s"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'JetBrains Mono',monospace",fontSize:"0.65rem",color:"#475569",marginBottom:10}}>
+                  <span>Chunk {chunksDone} / {chunksTotal}</span><span>{pct}%</span>
+                </div>
+                {bugs.length>0&&<div style={{fontSize:"0.75rem",color:"#f87171",marginBottom:12}}>⚠ {bugs.length} issue{bugs.length!==1?"s":""} found so far</div>}
+                <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:14}}>
+                  {Array.from({length:chunksTotal}).map((_,i)=>(
+                    <div key={i} style={{width:10,height:10,borderRadius:3,background:i<chunksDone?"#22d3ee":i===chunksDone?"#818cf8":"#1e2d3d",transition:"background .2s"}} title={`Chunk ${i+1}`}/>
+                  ))}
+                </div>
+                <button style={c.btnOrange} onClick={stopAnalyze}>⏹ Stop & Show Results</button>
+              </div>
+            )}
+
+            {/* Results */}
+            {step==="analyzed"&&!analyzing&&(
+              <div style={c.card}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:14}}>Analysis Report</div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:6,fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",fontWeight:700,textTransform:"uppercase",letterSpacing:1,background:`${SEV[severity]||"#fbbf24"}15`,color:SEV[severity]||"#fbbf24",border:`1px solid ${SEV[severity]||"#fbbf24"}35`}}>⚠ {severity}</span>
+                  {[{n:bugs.length,l:"Issues"},{n:patches.length,l:"Fixed"},{n:lineCount.toLocaleString(),l:"Lines"},{n:chunksTotal,l:"Chunks"}].map((s,i)=>(
+                    <div key={i} style={{background:"#0f1e30",border:"1px solid #1e2d3d",borderRadius:8,padding:"8px 14px",textAlign:"center"}}>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"1.1rem",fontWeight:700,color:"#e2e8f0",display:"block"}}>{s.n}</span>
+                      <span style={{fontSize:"0.58rem",color:"#475569",textTransform:"uppercase",letterSpacing:1}}>{s.l}</span>
+                    </div>
+                  ))}
+                </div>
+                {bugs.length===0
+                  ? <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.2)",borderRadius:10,padding:"14px 16px",fontSize:"0.82rem",color:"#4ade80"}}>✓ No issues found. Code looks clean!</div>
+                  : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:420,overflowY:"auto"}}>
+                    {bugs.map((b,i)=>(
+                      <div key={i} style={{background:"#0a1020",border:"1px solid rgba(248,113,113,.12)",borderRadius:10,padding:"12px 14px",fontSize:"0.78rem",lineHeight:1.6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:"#f87171",fontWeight:700,fontSize:"0.65rem"}}>#{String(i+1).padStart(2,"0")}</span>
+                          {b.line&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",color:"#475569",background:"#0f1e30",borderRadius:4,padding:"2px 8px"}}>Line {b.line}</span>}
+                          {patches.find(p=>p.lineNum===b.line)&&<span style={{fontSize:"0.6rem",color:"#4ade80",fontFamily:"'JetBrains Mono',monospace"}}>✓ PATCHED</span>}
+                        </div>
+                        <div style={{color:"#cbd5e1",marginBottom:b.original||b.fixed?8:0}}>{b.description}</div>
+                        {(b.original||b.fixed)&&(
+                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                            {b.original&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",padding:"6px 10px",borderRadius:6,background:"rgba(248,113,113,.07)",color:"#f87171",borderLeft:"3px solid #f87171",whiteSpace:"pre-wrap",wordBreak:"break-all"}}>- {b.original}</div>}
+                            {b.fixed&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",padding:"6px 10px",borderRadius:6,background:"rgba(74,222,128,.07)",color:"#4ade80",borderLeft:"3px solid #4ade80",whiteSpace:"pre-wrap",wordBreak:"break-all"}}>+ {b.fixed}</div>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                }
+                {patched&&patches.length>0&&(
+                  <>
+                    <div style={{fontSize:"0.65rem",color:"#4ade80",fontFamily:"'JetBrains Mono',monospace",marginTop:16,marginBottom:8}}>✓ {patches.length} patch{patches.length!==1?"es":""} applied — toggle "Patched" tab above to review</div>
+                    <div style={c.commitRow}>
+                      <input style={c.commitInput} placeholder={`fix: resolve ${bugs.length} issues`} value={commit} onChange={e=>setCommit(e.target.value)}/>
+                      <button style={c.btnGreen} onClick={()=>push(patched)}>↑ Push Fix</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Replace */}
+            {mode==="replace"&&step!=="pushed"&&(
+              <div style={c.card}>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:14}}>Upload Replacement</div>
+                <p style={{fontSize:"0.8rem",color:"#475569",marginBottom:16,lineHeight:1.7}}>Upload a file to overwrite <strong style={{color:"#e2e8f0"}}>{selFile.path}</strong> on GitHub.</p>
+                <div onClick={()=>fileRef.current?.click()} style={{border:"2px dashed #1e2d3d",borderRadius:12,padding:"32px 20px",textAlign:"center",cursor:"pointer"}}>
+                  <div style={{fontSize:"2rem",marginBottom:8}}>{upName?"✅":"📁"}</div>
+                  <div style={{fontSize:"0.82rem",color:"#94a3b8",fontWeight:500}}>{upName||"Tap to choose a file"}</div>
+                  <div style={{fontSize:"0.68rem",color:"#2d3f55",marginTop:4}}>{upName?`${upCode.split("\n").length.toLocaleString()} lines`:"Any text or code file"}</div>
+                </div>
+                <input ref={fileRef} type="file" style={{display:"none"}} onChange={handleUpload}/>
+                {upCode&&(
+                  <>
+                    <div style={c.codeBox}>
+                      <div style={c.codeBar}><span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",color:"#22d3ee"}}>Preview</span><span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.6rem",color:"#2d3f55"}}>{upCode.split("\n").length.toLocaleString()} lines</span></div>
+                      <pre style={c.pre}>{upCode}</pre>
+                    </div>
+                    <div style={c.commitRow}>
+                      <input style={c.commitInput} placeholder="chore: replace file" value={commit} onChange={e=>setCommit(e.target.value)}/>
+                      <button style={c.btnGreen} onClick={()=>{setSha("");push(upCode);}}>↑ Push to GitHub</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {err&&<div style={c.errBox}>⚠ {err}</div>}
+          </>
+        )}
+
+        {/* Success */}
+        {step==="pushed"&&(
+          <div style={{background:"rgba(74,222,128,.05)",border:"1px solid rgba(74,222,128,.2)",borderRadius:14,padding:"40px 20px",textAlign:"center"}}>
+            <div style={{fontSize:"2.5rem",marginBottom:12}}>✅</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.3rem",fontWeight:800,color:"#4ade80",marginBottom:6}}>Pushed to GitHub!</div>
+            <div style={{fontSize:"0.75rem",color:"#475569",marginBottom:22,lineHeight:1.6}}>{selRepo?.full_name}/{selFile?.path}<br/>updated successfully.</div>
+            <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+              <button style={c.btnGhost} onClick={()=>{setStep("idle");setCode("");setBugs([]);setPatched("");setPatches([]);setUpCode("");setUpName("");setCommit("");setErr("");}}>Analyze Another</button>
+              <button style={c.btnGhost} onClick={()=>{setScreen("files");setSelFile(null);setStep("idle");resetA();setCommit("");setErr("");}}>← Back to Files</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
