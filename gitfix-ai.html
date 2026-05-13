@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>GitFix AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#070a10;color:#e2e8f0;font-family:'Inter',sans-serif;}
+  ::-webkit-scrollbar{width:5px;height:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#1e2d3d;border-radius:4px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef } = React;
+
+const SEVERITY_COLOR = { low:"#4ade80", medium:"#fbbf24", high:"#f97316", critical:"#f87171" };
+const LANG_COLOR = { JavaScript:"#f7df1e",TypeScript:"#3178c6",Python:"#3572A5",HTML:"#e34c26",CSS:"#563d7c",Go:"#00add8",Rust:"#dea584",Java:"#b07219","C++":"#f34b7d",PHP:"#4F5D95",Ruby:"#701516",Swift:"#f05138",Kotlin:"#a97bff",Vue:"#42b883",default:"#475569" };
+function getLangDot(l){return LANG_COLOR[l]||LANG_COLOR.default;}
+function getIcon(p){const e=p.split(".").pop()?.toLowerCase();const m={js:"🟨",ts:"🔷",jsx:"🟦",tsx:"🔷",py:"🐍",html:"🌐",css:"🎨",json:"📋",md:"📝",go:"🐹",rs:"🦀",java:"☕",php:"🐘",rb:"💎",vue:"💚",svg:"🖼️",sh:"⚙️",gitignore:"🙈",env:"🔒"};return m[e]||"📄";}
+function timeAgo(d){const s=Math.floor((Date.now()-new Date(d))/1000);if(s<60)return"just now";if(s<3600)return`${Math.floor(s/60)}m ago`;if(s<86400)return`${Math.floor(s/3600)}h ago`;return`${Math.floor(s/86400)}d ago`;}
+function sevRank(s){return{critical:4,high:3,medium:2,low:1}[s]||0;}
+
+const CHUNK = 400;
+
+async function analyzeChunk(lines, start, idx, total) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify({
+      model:"claude-sonnet-4-20250514", max_tokens:4096,
+      messages:[{role:"user",content:`Analyze chunk ${idx+1}/${total}, lines ${start+1}–${start+lines.length}. Find ALL bugs, security issues, performance problems, bad practices.
+Return ONLY valid JSON no markdown:
+{"severity":"low|medium|high|critical","bugs":[{"line":<absolute line number>,"description":"clear issue description","original":"exact problematic line","fixed":"corrected line"}]}
+If no issues: {"severity":"low","bugs":[]}
+Code (starts at line ${start+1}):
+${lines.join("\n")}`}]
+    })
+  });
+  if(!res.ok) throw new Error(`Anthropic API ${res.status}`);
+  const d = await res.json();
+  const t = d.content.filter(b=>b.type==="text").map(b=>b.text).join("");
+  return JSON.parse(t.replace(/```json\n?|```\n?/g,"").trim());
+}
+
+function applyPatches(origLines, bugs) {
+  const p=[...origLines]; const applied=[];
+  bugs.forEach(bug=>{
+    if(!bug.original||!bug.fixed) return;
+    const tl=(bug.line||1)-1;
+    const s=Math.max(0,tl-20), e=Math.min(p.length-1,tl+20);
+    for(let i=s;i<=e;i++){
+      if(p[i]?.trim()===bug.original?.trim()){
+        p[i]=p[i].replace(p[i].trim(),bug.fixed.trim());
+        applied.push({...bug,lineNum:i+1}); break;
+      }
+    }
+  });
+  return{patched:p,applied};
+}
+
+function App() {
+  const [token,setToken]=useState("");
+  const [connected,setConnected]=useState(false);
+  const [user,setUser]=useState(null);
+  const [repos,setRepos]=useState([]);
+  const [screen,setScreen]=useState("repos");
+  const [selRepo,setSelRepo]=useState(null);
+  const [fileTree,setFileTree]=useState([]);
+  const [fileQ,setFileQ]=useState("");
+  const [selFile,setSelFile]=useState(null);
+  const [mode,setMode]=useState("analyze");
+  const [code,setCode]=useState("");
+  const [sha,setSha]=useState("");
+  const [bugs,setBugs]=useState([]);
+  const [severity,setSeverity]=useState("low");
+  const [patched,setPatched]=useState("");
+  const [patches,setPatches]=useState([]);
+  const [showFixed,setShowFixed]=useState(false);
+  const [analyzing,setAnalyzing]=useState(false);
+  const [chunksTotal,setChunksTotal]=useState(0);
+  const [chunksDone,setChunksDone]=useState(0);
+  const [upCode,setUpCode]=useState("");
+  const [upName,setUpName]=useState("");
+  const [commit,setCommit]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [loadMsg,setLoadMsg]=useState("");
+  const [err,setErr]=useState("");
+  const [step,setStep]=useState("idle");
+  const abortRef=useRef(false);
+  const fileRef=useRef();
+
+  const gh={Authorization:`token ${token}`,Accept:"application/vnd.github.v3+json"};
+
+  function resetA(){setCode("");setSha("");setBugs([]);setSeverity("low");setPatched("");setPatches([]);setShowFixed(false);setChunksDone(0);setChunksTotal(0);setAnalyzing(false);abortRef.current=false;}
+
+  async function connect(){
+    if(!token.trim()){setErr("Paste your GitHub token first.");return;}
+    setErr("");setLoading(true);setLoadMsg("Connecting…");
+    try{
+      const u=await fetch("https://api.github.com/user",{headers:gh});
+      if(!u.ok)throw new Error("Invalid token — check it and try again.");
+      const ud=await u.json(); setUser(ud);
+      let all=[];
+      for(let p=1;p<=4;p++){
+        const r=await fetch(`https://api.github.com/user/repos?per_page=50&page=${p}&sort=pushed`,{headers:gh});
+        const rd=await r.json(); all=[...all,...rd]; if(rd.length<50)break;
+      }
+      setRepos(all); setConnected(true); setScreen("repos");
+    }catch(e){setErr(e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  async function pickRepo(repo){
+    setSelRepo(repo);setSelFile(null);setFileTree([]);setFileQ("");resetA();setErr("");
+    setLoading(true);setLoadMsg(`Loading ${repo.name}…`);
+    try{
+      const branch=repo.default_branch||"main";
+      const t=await fetch(`https://api.github.com/repos/${repo.full_name}/git/trees/${branch}?recursive=1`,{headers:gh});
+      const td=await t.json();
+      setFileTree((td.tree||[]).filter(f=>f.type==="blob"));
+      setScreen("files");
+    }catch(e){setErr("Could not load files: "+e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  function pickFile(f){
+    setSelFile(f);resetA();setUpCode("");setUpName("");setCommit("");setStep("idle");setErr("");setMode("analyze");setScreen("action");
+  }
+
+  async function fetchFile(){
+    setErr("");setLoading(true);setLoadMsg("Fetching file…");
+    try{
+      const r=await fetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,{headers:gh});
+      if(!r.ok){const e=await r.json();throw new Error(e.message);}
+      const d=await r.json();
+      const dec=decodeURIComponent(escape(atob(d.content.replace(/\n/g,""))));
+      setCode(dec);setSha(d.sha);setStep("fetched");
+    }catch(e){setErr(e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  async function analyze(){
+    setErr("");setBugs([]);setSeverity("low");setPatched("");setPatches([]);
+    setAnalyzing(true);abortRef.current=false;setStep("analyzing");
+    const lines=code.split("\n");
+    const chunks=[];
+    for(let i=0;i<lines.length;i+=CHUNK) chunks.push({lines:lines.slice(i,i+CHUNK),start:i});
+    setChunksTotal(chunks.length);setChunksDone(0);
+    const collected=[];let worst="low";
+    try{
+      for(let i=0;i<chunks.length;i++){
+        if(abortRef.current)break;
+        const res=await analyzeChunk(chunks[i].lines,chunks[i].start,i,chunks.length);
+        const b=(res.bugs||[]).map(b=>({...b,chunkIdx:i}));
+        collected.push(...b);
+        if(sevRank(res.severity)>sevRank(worst))worst=res.severity;
+        setChunksDone(i+1);setBugs([...collected]);setSeverity(worst);
+        if(i<chunks.length-1)await new Promise(r=>setTimeout(r,300));
+      }
+      const{patched:p,applied:a}=applyPatches(lines,collected);
+      setPatched(p.join("\n"));setPatches(a);setStep("analyzed");
+    }catch(e){setErr("Analysis error: "+e.message);setStep(collected.length>0?"analyzed":"fetched");}
+    setAnalyzing(false);
+  }
+
+  function stopAnalyze(){
+    abortRef.current=true;setAnalyzing(false);
+    if(bugs.length>0){const l=code.split("\n");const{patched:p,applied:a}=applyPatches(l,bugs);setPatched(p.join("\n"));setPatches(a);setStep("analyzed");}
+    else setStep("fetched");
+  }
+
+  async function push(pushCode){
+    if(!commit.trim()){setErr("Enter a commit message.");return;}
+    setErr("");setLoading(true);setLoadMsg("Pushing to GitHub…");
+    try{
+      let s=sha;
+      if(!s){const r=await fetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,{headers:gh});if(r.ok){const d=await r.json();s=d.sha;}}
+      const enc=btoa(unescape(encodeURIComponent(pushCode)));
+      const body={message:commit,content:enc};if(s)body.sha=s;
+      const r=await fetch(`https://api.github.com/repos/${selRepo.full_name}/contents/${selFile.path}`,{method:"PUT",headers:{...gh,"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(!r.ok){const e=await r.json();throw new Error(e.message);}
+      setStep("pushed");
+    }catch(e){setErr(e.message);}
+    setLoading(false);setLoadMsg("");
+  }
+
+  function handleUpload(e){
+    const f=e.target.files[0];if(!f)return;
+    setUpName(f.name);
+    const r=new FileReader();r.onload=ev=>setUpCode(ev.target.result);r.readAsText(f);
+  }
+
+  const filtered=fileTree.filter(f=>f.path.toLowerCase().includes(fileQ.toLowerCase()));
+  const lineCount=code?code.split("\n").length:0;
+  const pct=chunksTotal>0?Math.round((chunksDone/chunksTotal)*100):0;
+
+  const S = {
+    app:{fontFamily:"'Inter',sans-serif",background:"#070a10",minHeight:"100vh",color:"#e2e8f0"},
+    topbar:{display:"flex",alignItems:"center",gap:14,padding:"14px 24px",borderBottom:"1px solid #0f1e30",background:"#070a10",position:"sticky",top:0,zIndex:50},
+    logo:{fontFamily:"'Syne',sans-serif",fontSize:"1.3rem",fontWeight:800,letterSpacing:"-0.5px"},
+    breadcrumb:{display:"flex",alignItems:"center",gap:8,padding:"11px 24px",fontSize:"0.72rem",color:"#334155",borderBottom:"1px solid #0f1e30",flexWrap:"wrap"},
+    main:{padding:24,maxWidth:980,margin:"0 auto"},
+    card:{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,padding:22,marginBottom:14},
+    cardLabel:{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",textTransform:"uppercase",letterSpacing:3,color:"#475569",marginBottom:16,display:"flex",alignItems:"center",gap:10},
+    input:{width:"100%",background:"#070a10",border:"1px solid #1e2d3d",borderRadius:10,padding:"12px 16px",fontFamily:"'JetBrains Mono',monospace",fontSize:"0.82rem",color:"#e2e8f0",outline:"none",marginBottom:12},
+    btnCyan:{display:"inline-flex",alignItems:"center",gap:7,padding:"11px 22px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",fontWeight:600,cursor:"pointer",border:"none",background:"#22d3ee",color:"#000"},
+    btnGhost:{display:"inline-flex",alignItems:"center",gap:7,padding:"11px 22px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",fontWeight:600,cursor:"pointer",background:"transparent",color:"#475569",border:"1px solid #1e2d3d"},
+    btnGreen:{display:"inline-flex",alignItems:"center",gap:7,padding:"11px 22px",borderRadius:10,fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",fontWeight:600,cursor:"pointer",border:"none",background:"#4ade80",color:"#000"},
+    btnOrange:{display:"inline-flex",alignItems:"center",gap:7,padding:"8px 16px",borderRadius:8,fontFamily:"'Inter',sans-serif",fontSize:"0.75rem",fontWeight:600,cursor:"pointer",border:"none",background:"#f97316",color:"#000"},
+    btnDanger:{display:"inline-flex",alignItems:"center",gap:7,padding:"7px 14px",borderRadius:8,fontFamily:"'Inter',sans-serif",fontSize:"0.73rem",fontWeight:600,cursor:"pointer",background:"transparent",color:"#f87171",border:"1px solid rgba(248,113,113,0.2)"},
+    errBox:{background:"rgba(248,113,113,0.05)",border:"1px solid rgba(248,113,113,0.2)",borderRadius:10,padding:"12px 16px",fontSize:"0.76rem",color:"#f87171",marginTop:12,lineHeight:1.5},
+    codeWrap:{background:"#070a10",border:"1px solid #1e2d3d",borderRadius:10,overflow:"hidden",marginTop:12},
+    codeBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 14px",background:"#0d1526",borderBottom:"1px solid #1e2d3d"},
+    codeFname:{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",color:"#22d3ee"},
+    codeMeta:{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.6rem",color:"#2d3f55",display:"flex",gap:14},
+    codeScroll:{overflow:"auto",maxHeight:320},
+    pre:{padding:16,fontFamily:"'JetBrains Mono',monospace",fontSize:"0.72rem",color:"#7dd3fc",lineHeight:1.75,whiteSpace:"pre",tabSize:2},
+    commitRow:{display:"flex",gap:8,marginTop:14},
+    commitInput:{flex:1,background:"#070a10",border:"1px solid #1e2d3d",borderRadius:10,padding:"11px 16px",fontFamily:"'Inter',sans-serif",fontSize:"0.8rem",color:"#e2e8f0",outline:"none"},
+    uploadZone:{border:"2px dashed #1e2d3d",borderRadius:12,padding:"36px 24px",textAlign:"center",cursor:"pointer"},
+  };
+
+  return (
+    <div style={S.app}>
+      {/* Topbar */}
+      <div style={S.topbar}>
+        <div style={S.logo}>Git<span style={{color:"#22d3ee"}}>Fix</span> AI</div>
+        {connected && (
+          <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:10}}>
+            {user?.avatar_url && <img src={user.avatar_url} style={{width:28,height:28,borderRadius:"50%",border:"2px solid #22d3ee40"}} alt=""/>}
+            <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.72rem",color:"#475569"}}>@{user?.login}</span>
+            <button style={S.btnDanger} onClick={()=>{setConnected(false);setUser(null);setRepos([]);setToken("");setScreen("repos");setSelRepo(null);setSelFile(null);setFileTree([]);resetA();}}>Disconnect</button>
+          </div>
+        )}
+      </div>
+
+      {/* Breadcrumb */}
+      {connected && (
+        <div style={S.breadcrumb}>
+          <span style={{cursor:"pointer",color:screen==="repos"?"#e2e8f0":"#334155"}} onClick={()=>{setScreen("repos");setSelRepo(null);setSelFile(null);resetA();}}>🏠 Repos</span>
+          {selRepo && <><span style={{color:"#1e2d3d"}}>›</span><span style={{cursor:"pointer"}} onClick={()=>{setScreen("files");setSelFile(null);resetA();setStep("idle");}}>{selRepo.name}</span></>}
+          {selFile && <><span style={{color:"#1e2d3d"}}>›</span><span style={{color:"#e2e8f0"}}>{selFile.path.split("/").pop()}</span></>}
+        </div>
+      )}
+
+      <div style={S.main}>
+
+        {/* ── CONNECT ── */}
+        {!connected && (
+          <div style={{maxWidth:460,margin:"60px auto"}}>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.9rem",fontWeight:800,marginBottom:6}}>Git<span style={{color:"#22d3ee"}}>Fix</span> AI</div>
+            <div style={{fontSize:"0.8rem",color:"#475569",marginBottom:28,lineHeight:1.7}}>Connect GitHub to browse your repos, analyze files with AI — even 50,000+ lines — and push fixes directly.</div>
+            <div style={S.card}>
+              <label style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.6rem",textTransform:"uppercase",letterSpacing:2,color:"#475569",marginBottom:8,display:"block"}}>GitHub Personal Access Token</label>
+              <input style={S.input} type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" value={token} onChange={e=>setToken(e.target.value)} onKeyDown={e=>e.key==="Enter"&&connect()}/>
+              <button style={{...S.btnCyan,width:"100%",justifyContent:"center"}} onClick={connect} disabled={loading}>{loading?"Connecting…":"Connect GitHub →"}</button>
+              <div style={{fontSize:"0.68rem",color:"#2d3f55",marginTop:12,lineHeight:1.6}}>Go to <strong style={{color:"#475569"}}>github.com/settings/tokens</strong> → Generate new token (classic) → check <strong style={{color:"#475569"}}>repo</strong> scope → copy here.</div>
+            </div>
+            {err && <div style={S.errBox}>⚠ {err}</div>}
+          </div>
+        )}
+
+        {/* Loading */}
+        {loading && connected && (
+          <div style={S.card}><div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:18,height:18,border:"2px solid #1e2d3d",borderTopColor:"#22d3ee",borderRadius:"50%",animation:"spin .7s linear infinite"}}/>
+            <span style={{fontSize:"0.8rem",color:"#475569"}}>{loadMsg}</span>
+          </div></div>
+        )}
+
+        {/* ── REPOS ── */}
+        {connected && !loading && screen==="repos" && (
+          <>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+              <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:800}}>Your Repositories</div>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.65rem",color:"#475569",background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:20,padding:"3px 12px"}}>{repos.length} repos</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+              {repos.map(repo=>(
+                <div key={repo.id} onClick={()=>pickRepo(repo)} style={{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,padding:20,cursor:"pointer",position:"relative",transition:"all .2s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="#22d3ee40";e.currentTarget.style.transform="translateY(-2px)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="#1e2d3d";e.currentTarget.style.transform="translateY(0)";}}>
+                  <div style={{fontWeight:700,fontSize:"0.95rem",marginBottom:6,display:"flex",alignItems:"center",gap:8,overflow:"hidden"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{repo.name}</span>
+                    {repo.fork && <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",padding:"2px 8px",borderRadius:4,background:"rgba(129,140,248,.08)",color:"#818cf8",border:"1px solid rgba(129,140,248,.2)",flexShrink:0}}>fork</span>}
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.58rem",padding:"2px 8px",borderRadius:4,flexShrink:0,...(repo.private?{background:"rgba(251,191,36,.1)",color:"#fbbf24",border:"1px solid rgba(251,191,36,.2)"}:{background:"rgba(74,222,128,.08)",color:"#4ade80",border:"1px solid rgba(74,222,128,.15)"})}}>
+                      {repo.private?"private":"public"}
+                    </span>
+                  </div>
+                  <div style={{fontSize:"0.74rem",color:"#475569",lineHeight:1.5,marginBottom:14,minHeight:32,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>
+                    {repo.description||<span style={{color:"#1e2d3d"}}>No description</span>}
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:12,fontSize:"0.67rem",color:"#334155",flexWrap:"wrap"}}>
+                    {repo.language && <span><span style={{width:8,height:8,borderRadius:"50%",background:getLangDot(repo.language),display:"inline-block",marginRight:4}}></span>{repo.language}</span>}
+                    <span>⭐ {repo.stargazers_count}</span>
+                    <span>🕐 {timeAgo(repo.pushed_at)}</span>
+                  </div>
+                  <div style={{position:"absolute",right:18,top:"50%",transform:"translateY(-50%)",color:"#1e2d3d",fontSize:"1.2rem"}}>›</div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* ── FILES ── */}
+        {connected && !loading && screen==="files" && selRepo && (
+          <>
+            <div style={{...S.card,display:"flex",alignItems:"center",gap:16,marginBottom:16}}>
+              <div style={{fontSize:"2rem"}}>📁</div>
+              <div>
+                <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.1rem",fontWeight:800}}>{selRepo.name}</div>
+                <div style={{fontSize:"0.72rem",color:"#475569",marginTop:2}}>{selRepo.full_name} · {fileTree.length} files · {selRepo.default_branch}</div>
+              </div>
+            </div>
+            <div style={{position:"relative",marginBottom:12}}>
+              <span style={{position:"absolute",left:14,top:"50%",transform:"translateY(-50%)",fontSize:"0.9rem",pointerEvents:"none"}}>🔍</span>
+              <input style={{...S.input,paddingLeft:40,marginBottom:0}} placeholder="Search files…" value={fileQ} onChange={e=>setFileQ(e.target.value)}/>
+            </div>
+            <div style={{background:"#0d1526",border:"1px solid #1e2d3d",borderRadius:14,overflow:"hidden"}}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",color:"#334155",padding:"8px 18px",borderBottom:"1px solid #0f1e30"}}>
+                {filtered.length} of {fileTree.length} files{fileQ&&` matching "${fileQ}"`}
+              </div>
+              {filtered.length===0 ? (
+                <div style={{padding:32,textAlign:"center",fontSize:"0.78rem",color:"#2d3f55"}}>No files found</div>
+              ) : filtered.map((f,i)=>{
+                const parts=f.path.split("/"),name=parts.pop(),dir=parts.join("/");
+                const kb=f.size?(f.size/1024).toFixed(1)+" KB":"";
+                return (
+                  <div key={i} onClick={()=>pickFile(f)} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 18px",cursor:"pointer",borderBottom:"1px solid #0f1e3008",fontSize:"0.82rem",transition:"background .12s"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="rgba(34,211,238,.04)"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <span style={{fontSize:"1rem",flexShrink:0}}>{getIcon(f.path)}</span>
+                    <div style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {dir&&<span style={{color:"#475569",fontSize:"0.72rem"}}>{dir}/</span>}
+                      <span style={{fontWeight:500}}>{name}</span>
+                    </div>
+                    {kb&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",color:"#334155",flexShrink:0}}>{kb}</span>}
+                    <span style={{color:"#1e2d3d",fontSize:"0.7rem"}}>›</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* ── ACTION ── */}
+        {connected && !loading && screen==="action" && selFile && (
+          <>
+            <div style={S.card}>
+              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.8rem",color:"#22d3ee",marginBottom:6,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span>{getIcon(selFile.path)}</span><span>{selFile.path}</span>
+              </div>
+              <div style={{fontSize:"0.68rem",color:"#334155",display:"flex",gap:16,flexWrap:"wrap"}}>
+                <span>📦 {selRepo?.name}</span>
+                {selFile.size&&<span>💾 {(selFile.size/1024).toFixed(1)} KB</span>}
+                {lineCount>0&&<span>📄 {lineCount.toLocaleString()} lines</span>}
+                {lineCount>0&&chunksTotal>0&&<span>🧩 {chunksTotal} chunks</span>}
+              </div>
+              <div style={{display:"flex",gap:3,background:"#070a10",border:"1px solid #1e2d3d",borderRadius:10,padding:4,width:"fit-content",marginTop:14}}>
+                {["analyze","replace"].map(m=>(
+                  <button key={m} onClick={()=>{setMode(m);if(m==="replace"){setStep("idle");setUpCode("");setUpName("");setErr("");}else{setStep(code?"fetched":"idle");}}} style={{padding:"8px 22px",fontFamily:"'Inter',sans-serif",fontSize:"0.75rem",fontWeight:600,border:"none",borderRadius:7,cursor:"pointer",transition:"all .18s",...(mode===m?{background:"#22d3ee",color:"#000"}:{background:"transparent",color:"#475569"})}}>
+                    {m==="analyze"?"🤖 Analyze & Fix":"↺ Replace File"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Analyze */}
+            {mode==="analyze" && step==="idle" && (
+              <div style={S.card}>
+                <div style={{...S.cardLabel}}>Fetch File</div>
+                <p style={{fontSize:"0.8rem",color:"#475569",marginBottom:16,lineHeight:1.7}}>Pull <strong style={{color:"#e2e8f0"}}>{selFile.path.split("/").pop()}</strong> and run chunked AI analysis — handles files of any size, including 50,000+ lines.</p>
+                <button style={S.btnCyan} onClick={fetchFile}>↓ Fetch File</button>
+              </div>
+            )}
+
+            {mode==="analyze" && (step==="fetched"||step==="analyzing"||step==="analyzed") && (
+              <div style={S.card}>
+                <div style={S.cardLabel}>{step==="analyzed"?"Code Review":step==="analyzing"?"Analyzing…":"File Preview"}</div>
+                {step==="analyzed"&&patched&&(
+                  <div style={{display:"flex",gap:4,marginBottom:8}}>
+                    {["Original","Patched Code"+(patches.length>0?` (${patches.length} fixes)`:"")].map((t,i)=>(
+                      <button key={i} onClick={()=>setShowFixed(i===1)} style={{padding:"6px 16px",borderRadius:7,fontSize:"0.68rem",fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"all .18s",...(showFixed===(i===1)?{borderColor:"#818cf8",color:"#818cf8",background:"rgba(129,140,248,.08)",border:"1px solid #818cf8"}:{border:"1px solid #1e2d3d",background:"transparent",color:"#475569"})}}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <div style={S.codeWrap}>
+                  <div style={S.codeBar}>
+                    <span style={S.codeFname}>{selFile.path}</span>
+                    <div style={S.codeMeta}><span>{lineCount.toLocaleString()} lines</span></div>
+                  </div>
+                  <div style={S.codeScroll}><pre style={S.pre}>{showFixed&&patched?patched:code}</pre></div>
+                </div>
+                {step==="fetched"&&(
+                  <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
+                    <button style={S.btnCyan} onClick={analyze}>🤖 Start AI Analysis</button>
+                    <button style={S.btnGhost} onClick={()=>{setStep("idle");setCode("");}}>← Back</button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step==="analyzing"&&(
+              <div style={S.card}>
+                <div style={S.cardLabel}>AI Analysis in Progress</div>
+                <div style={{marginBottom:8,background:"#0f1e30",borderRadius:100,height:8,overflow:"hidden"}}>
+                  <div style={{height:"100%",background:"linear-gradient(90deg,#22d3ee,#818cf8)",borderRadius:100,width:`${pct}%`,transition:"width .3s ease"}}/>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'JetBrains Mono',monospace",fontSize:"0.65rem",color:"#475569",marginBottom:8}}>
+                  <span>Chunk {chunksDone} of {chunksTotal}</span>
+                  <span>{pct}%</span>
+                </div>
+                {bugs.length>0&&<div style={{fontSize:"0.72rem",color:"#f87171",marginBottom:12}}>⚠ {bugs.length} issue{bugs.length!==1?"s":""} found so far</div>}
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:14}}>
+                  {Array.from({length:chunksTotal}).map((_,i)=>(
+                    <div key={i} title={`Chunk ${i+1}`} style={{width:10,height:10,borderRadius:3,background:i<chunksDone?"#22d3ee":i===chunksDone?"#818cf8":"#1e2d3d",transition:"background .2s"}}/>
+                  ))}
+                </div>
+                <button style={S.btnOrange} onClick={stopAnalyze}>⏹ Stop & Show Results</button>
+              </div>
+            )}
+
+            {step==="analyzed"&&!analyzing&&(
+              <div style={S.card}>
+                <div style={S.cardLabel}>Analysis Report</div>
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 12px",borderRadius:6,fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",fontWeight:700,textTransform:"uppercase",letterSpacing:1,background:`${SEVERITY_COLOR[severity]||"#fbbf24"}15`,color:SEVERITY_COLOR[severity]||"#fbbf24",border:`1px solid ${SEVERITY_COLOR[severity]||"#fbbf24"}35`}}>⚠ {severity} severity</span>
+                  {[{n:bugs.length,l:"Issues"},{n:patches.length,l:"Auto-fixed"},{n:lineCount.toLocaleString(),l:"Lines"},{n:chunksTotal,l:"Chunks"}].map((s,i)=>(
+                    <div key={i} style={{background:"#0f1e30",border:"1px solid #1e2d3d",borderRadius:8,padding:"8px 14px",fontSize:"0.72rem",textAlign:"center"}}>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"1.2rem",fontWeight:700,color:"#e2e8f0",display:"block"}}>{s.n}</span>
+                      <span style={{fontSize:"0.6rem",color:"#475569",textTransform:"uppercase",letterSpacing:1}}>{s.l}</span>
+                    </div>
+                  ))}
+                </div>
+                {bugs.length===0
+                  ? <div style={{background:"rgba(74,222,128,.06)",border:"1px solid rgba(74,222,128,.2)",borderRadius:10,padding:"16px 18px",fontSize:"0.82rem",color:"#4ade80"}}>✓ No issues found. Code looks clean!</div>
+                  : <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:400,overflowY:"auto",paddingRight:4}}>
+                    {bugs.map((b,i)=>(
+                      <div key={i} style={{background:"#0a1020",border:"1px solid rgba(248,113,113,.12)",borderRadius:10,padding:"12px 14px",fontSize:"0.78rem",lineHeight:1.6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                          <span style={{fontFamily:"'JetBrains Mono',monospace",color:"#f87171",fontWeight:700,fontSize:"0.65rem"}}>#{String(i+1).padStart(2,"0")}</span>
+                          {b.line&&<span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.62rem",color:"#475569",background:"#0f1e30",borderRadius:4,padding:"2px 8px"}}>Line {b.line}</span>}
+                          {patches.find(p=>p.line===b.line&&p.description===b.description)&&<span style={{fontSize:"0.6rem",color:"#4ade80",fontFamily:"'JetBrains Mono',monospace"}}>✓ PATCHED</span>}
+                        </div>
+                        <div style={{color:"#cbd5e1",marginBottom:b.original||b.fixed?8:0}}>{b.description}</div>
+                        {(b.original||b.fixed)&&(
+                          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                            {b.original&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",padding:"6px 10px",borderRadius:6,background:"rgba(248,113,113,.07)",color:"#f87171",borderLeft:"3px solid #f87171",whiteSpace:"pre-wrap",wordBreak:"break-all"}}>- {b.original}</div>}
+                            {b.fixed&&<div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:"0.68rem",padding:"6px 10px",borderRadius:6,background:"rgba(74,222,128,.07)",color:"#4ade80",borderLeft:"3px solid #4ade80",whiteSpace:"pre-wrap",wordBreak:"break-all"}}>+ {b.fixed}</div>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                }
+                {patched&&patches.length>0&&(
+                  <>
+                    <div style={{fontSize:"0.65rem",color:"#4ade80",fontFamily:"'JetBrains Mono',monospace",textTransform:"uppercase",letterSpacing:1,marginTop:16,marginBottom:8}}>✓ {patches.length} patch{patches.length!==1?"es":""} applied — toggle "Patched Code" above to review</div>
+                    <div style={S.commitRow}>
+                      <input style={S.commitInput} placeholder={`fix: resolve ${bugs.length} AI-detected issues`} value={commit} onChange={e=>setCommit(e.target.value)}/>
+                      <button style={S.btnGreen} onClick={()=>push(patched)}>↑ Push Patched File</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Replace */}
+            {mode==="replace"&&step!=="pushed"&&(
+              <div style={S.card}>
+                <div style={S.cardLabel}>Upload Replacement</div>
+                <p style={{fontSize:"0.8rem",color:"#475569",marginBottom:16,lineHeight:1.7}}>Upload a local file to overwrite <strong style={{color:"#e2e8f0"}}>{selFile.path}</strong> on GitHub.</p>
+                <div style={S.uploadZone} onClick={()=>fileRef.current?.click()}>
+                  <div style={{fontSize:"2.2rem",marginBottom:10}}>{upName?"✅":"📁"}</div>
+                  <div style={{fontSize:"0.82rem",color:"#94a3b8",fontWeight:500}}>{upName||"Click to choose a file"}</div>
+                  <div style={{fontSize:"0.68rem",color:"#2d3f55",marginTop:5}}>{upName?`${upCode.split("\n").length.toLocaleString()} lines — ready to push`:"Any text or code file"}</div>
+                </div>
+                <input ref={fileRef} type="file" style={{display:"none"}} onChange={handleUpload}/>
+                {upCode&&(
+                  <>
+                    <div style={{margin:"14px 0 6px"}}>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(34,211,238,.08)",border:"1px solid rgba(34,211,238,.2)",borderRadius:6,padding:"4px 12px",fontFamily:"'JetBrains Mono',monospace",fontSize:"0.7rem",color:"#22d3ee"}}>📄 {upName}</span>
+                    </div>
+                    <div style={S.codeWrap}>
+                      <div style={S.codeBar}><span style={S.codeFname}>Preview</span><div style={S.codeMeta}><span>{upCode.split("\n").length.toLocaleString()} lines</span></div></div>
+                      <div style={S.codeScroll}><pre style={S.pre}>{upCode}</pre></div>
+                    </div>
+                    <div style={S.commitRow}>
+                      <input style={S.commitInput} placeholder="chore: replace file via GitFix AI" value={commit} onChange={e=>setCommit(e.target.value)}/>
+                      <button style={S.btnGreen} onClick={()=>{setSha("");push(upCode);}}>↑ Push to GitHub</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Success */}
+        {step==="pushed"&&(
+          <div style={{background:"rgba(74,222,128,.05)",border:"1px solid rgba(74,222,128,.2)",borderRadius:14,padding:"40px 24px",textAlign:"center"}}>
+            <div style={{fontSize:"2.8rem",marginBottom:12}}>✅</div>
+            <div style={{fontFamily:"'Syne',sans-serif",fontSize:"1.3rem",fontWeight:800,color:"#4ade80",marginBottom:6}}>Pushed to GitHub!</div>
+            <div style={{fontSize:"0.75rem",color:"#475569",marginBottom:22,lineHeight:1.6}}>{selRepo?.full_name}/{selFile?.path}<br/>updated successfully.</div>
+            <div style={{display:"flex",gap:8,justifyContent:"center",flexWrap:"wrap"}}>
+              <button style={S.btnGhost} onClick={()=>{setStep("idle");setCode("");setBugs([]);setPatched("");setPatches([]);setUpCode("");setUpName("");setCommit("");setErr("");}}>Analyze Another</button>
+              <button style={S.btnGhost} onClick={()=>{setScreen("files");setSelFile(null);setStep("idle");resetA();setCommit("");setErr("");}}>← Back to Files</button>
+            </div>
+          </div>
+        )}
+
+        {err&&<div style={S.errBox}>⚠ {err}</div>}
+      </div>
+
+      <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
