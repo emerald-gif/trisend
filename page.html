@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Loading… · Trisend</title>
+<meta name="description" content="Powered by Trisend">
+<meta property="og:type" content="website">
+<meta property="og:title" id="ogTitle" content="Trisend Page">
+<meta property="og:description" id="ogDesc" content="Powered by Trisend">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{min-height:100%;-webkit-font-smoothing:antialiased;}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#F8FAFC;}
+@keyframes pulse{0%,100%{transform:scale(1);}50%{transform:scale(.9);opacity:.7;}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:translateY(0);}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:4px;}
+
+/* ── States ── */
+#loadState{display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:14px;background:#F8FAFC;}
+.load-mark{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#F97316,#EF4444);display:flex;align-items:center;justify-content:center;animation:pulse 1.4s ease-in-out infinite;box-shadow:0 4px 20px rgba(249,115,22,.35);}
+.load-text{font-size:14px;font-weight:700;color:#64748B;}
+#errState{display:none;text-align:center;padding:60px 24px;min-height:100vh;display:none;flex-direction:column;align-items:center;justify-content:center;}
+#errState h2{font-size:24px;font-weight:900;margin-bottom:10px;color:#0D1117;}
+#errState p{font-size:14px;color:#64748B;margin-bottom:24px;line-height:1.7;}
+#mainPage{display:none;animation:fadeIn .3s ease;}
+
+/* ── Powered by badge ── */
+.powered-bar{text-align:center;padding:20px 16px 28px;}
+.powered-bar a{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:#94A3B8;text-decoration:none;padding:7px 16px;border-radius:50px;background:rgba(255,255,255,.8);border:1.5px solid #E2E8F0;backdrop-filter:blur(4px);transition:.18s;}
+.powered-bar a:hover{color:#F97316;border-color:#F97316;background:#fff;}
+.pw-mark{width:16px;height:16px;border-radius:4px;background:linear-gradient(135deg,#F97316,#EF4444);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+/* ════════════════════════════════════════════════════════
+   BIO PAGE
+════════════════════════════════════════════════════════ */
+.bio-page{min-height:100vh;}
+.bio-hero{width:100%;padding:52px 20px 36px;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative;overflow:hidden;}
+.bio-hero-bg{position:absolute;inset:0;z-index:0;}
+.bio-hero-content{position:relative;z-index:1;}
+.bio-av{width:88px;height:88px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:42px;margin:0 auto 16px;border:4px solid rgba(255,255,255,.4);background:rgba(255,255,255,.15);box-shadow:0 8px 32px rgba(0,0,0,.15);}
+.bio-av img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.bio-name{font-size:26px;font-weight:900;color:#fff;letter-spacing:-.6px;margin-bottom:7px;text-shadow:0 2px 10px rgba(0,0,0,.2);}
+.bio-tagline{font-size:14px;color:rgba(255,255,255,.82);max-width:280px;line-height:1.6;text-shadow:0 1px 4px rgba(0,0,0,.15);}
+.bio-socials{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;justify-content:center;}
+.bio-soc-btn{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.2);border:1.5px solid rgba(255,255,255,.3);display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;text-decoration:none;transition:.18s;}
+.bio-soc-btn:hover{background:rgba(255,255,255,.35);transform:scale(1.1);}
+
+.bio-links-wrap{max-width:480px;width:100%;margin:0 auto;padding:24px 16px 0;}
+.bio-link{display:flex;align-items:center;gap:14px;padding:14px 18px;border-radius:14px;text-decoration:none;margin-bottom:10px;transition:all .2s;border:1.5px solid transparent;cursor:pointer;}
+.bio-link:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.1);}
+.bl-ico{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;}
+.bl-title{font-size:14px;font-weight:700;flex:1;}
+.bl-arr{flex-shrink:0;opacity:.4;}
+
+/* Bio themes */
+.bio-t-orange .bio-hero-bg{background:linear-gradient(135deg,#F97316,#EF4444);}
+.bio-t-purple .bio-hero-bg{background:linear-gradient(135deg,#8B5CF6,#EC4899);}
+.bio-t-blue   .bio-hero-bg{background:linear-gradient(135deg,#3B82F6,#06B6D4);}
+.bio-t-green  .bio-hero-bg{background:linear-gradient(135deg,#10B981,#3B82F6);}
+.bio-t-dark   .bio-hero-bg{background:linear-gradient(135deg,#0F172A,#1E293B);}
+.bio-t-gold   .bio-hero-bg{background:linear-gradient(135deg,#F59E0B,#F97316);}
+
+/* Bio link icon bg — per theme */
+.bio-t-orange .bl-ico{background:linear-gradient(135deg,#F97316,#EF4444);}
+.bio-t-purple .bl-ico{background:linear-gradient(135deg,#8B5CF6,#EC4899);}
+.bio-t-blue   .bl-ico{background:linear-gradient(135deg,#3B82F6,#06B6D4);}
+.bio-t-green  .bl-ico{background:linear-gradient(135deg,#10B981,#3B82F6);}
+.bio-t-dark   .bl-ico{background:linear-gradient(135deg,#F59E0B,#F97316);}
+.bio-t-gold   .bl-ico{background:linear-gradient(135deg,#F59E0B,#F97316);}
+
+/* Link styles */
+.ls-solid{background:#fff;border-color:rgba(0,0,0,.06);}
+.ls-solid .bl-title{color:#0F172A;}
+.ls-outline{background:transparent;border-color:rgba(0,0,0,.15);}
+.ls-outline .bl-title{color:#0F172A;}
+.ls-soft{background:rgba(249,115,22,.08);border-color:rgba(249,115,22,.18);}
+.ls-soft .bl-title{color:#F97316;}
+
+/* ════════════════════════════════════════════════════════
+   BUSINESS CARD PAGE
+════════════════════════════════════════════════════════ */
+.card-page{min-height:100vh;}
+.card-cover{height:120px;position:relative;overflow:hidden;}
+.card-cover-grad{position:absolute;inset:0;}
+.card-body-wrap{padding:0 20px 28px;margin-top:-40px;max-width:540px;margin-left:auto;margin-right:auto;}
+.card-avatar{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:36px;border-width:4px;border-style:solid;margin-bottom:14px;box-shadow:0 6px 20px rgba(0,0,0,.12);}
+.card-name{font-size:24px;font-weight:900;letter-spacing:-.5px;margin-bottom:4px;}
+.card-title{font-size:14px;margin-bottom:2px;}
+.card-company{font-size:13px;font-weight:700;margin-bottom:20px;}
+.card-divider{height:1px;margin-bottom:16px;}
+.card-contacts{display:flex;flex-direction:column;gap:11px;margin-bottom:20px;}
+.card-contact-row{display:flex;align-items:center;gap:12px;}
+.card-contact-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+.card-contact-info{flex:1;}
+.card-contact-label{font-size:10.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;margin-bottom:2px;}
+.card-contact-val{font-size:13.5px;font-weight:700;text-decoration:none;}
+.card-socials{display:flex;gap:8px;flex-wrap:wrap;}
+.card-soc-btn{padding:8px 14px;border-radius:8px;font-size:12px;font-weight:800;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:.18s;}
+.card-soc-btn:hover{transform:translateY(-2px);}
+.save-btn{width:100%;padding:14px;border-radius:12px;font-size:14px;font-weight:900;font-family:'Plus Jakarta Sans',sans-serif;cursor:pointer;border:none;margin-top:20px;transition:.18s;letter-spacing:-.2px;}
+.save-btn:hover{transform:translateY(-2px);}
+
+/* ════════════════════════════════════════════════════════
+   PRODUCTS PAGE
+════════════════════════════════════════════════════════ */
+.products-page{min-height:100vh;background:#F8FAFC;}
+.products-header{padding:28px 20px 22px;text-align:center;position:relative;overflow:hidden;}
+.prod-header-bg{position:absolute;inset:0;z-index:0;}
+.prod-header-content{position:relative;z-index:1;}
+.prod-brand-icon{font-size:44px;margin-bottom:10px;}
+.prod-brand-name{font-size:24px;font-weight:900;color:#fff;letter-spacing:-.5px;margin-bottom:4px;}
+.prod-tagline{font-size:13px;color:rgba(255,255,255,.8);}
+.products-grid-wrap{padding:18px 16px;max-width:600px;margin:0 auto;}
+.products-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.product-card{background:#fff;border-radius:14px;overflow:hidden;border:1.5px solid #E4EAF2;transition:all .22s;box-shadow:0 2px 8px rgba(0,0,0,.04);}
+.product-card:hover{transform:translateY(-4px);box-shadow:0 12px 32px rgba(0,0,0,.1);}
+.product-img{height:100px;display:flex;align-items:center;justify-content:center;font-size:36px;position:relative;overflow:hidden;}
+.product-info{padding:10px 12px 12px;}
+.product-name{font-size:13px;font-weight:800;color:#0D1117;margin-bottom:3px;}
+.product-desc{font-size:11px;color:#64748B;line-height:1.5;margin-bottom:7px;}
+.product-price{font-size:14px;font-weight:900;margin-bottom:8px;}
+.product-cta-btn{display:block;width:100%;padding:8px;border-radius:8px;font-size:12px;font-weight:800;text-align:center;text-decoration:none;font-family:'Plus Jakarta Sans',sans-serif;border:none;cursor:pointer;transition:.18s;}
+.product-cta-btn:hover{transform:scale(1.03);}
+
+/* Showcase style */
+.products-list{display:flex;flex-direction:column;gap:12px;}
+.product-list-card{background:#fff;border-radius:14px;padding:14px;display:flex;gap:14px;align-items:flex-start;border:1.5px solid #E4EAF2;transition:.22s;}
+.product-list-card:hover{transform:translateX(4px);box-shadow:0 6px 20px rgba(0,0,0,.07);}
+.product-list-img{width:70px;height:70px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;}
+.product-list-body{flex:1;min-width:0;}
+.product-list-name{font-size:15px;font-weight:800;color:#0D1117;margin-bottom:3px;}
+.product-list-desc{font-size:12px;color:#64748B;line-height:1.5;margin-bottom:7px;}
+.product-list-foot{display:flex;align-items:center;justify-content:space-between;}
+.product-list-price{font-size:15px;font-weight:900;}
+.product-list-btn{padding:6px 14px;border-radius:7px;font-size:11px;font-weight:800;text-decoration:none;font-family:'Plus Jakarta Sans',sans-serif;border:none;cursor:pointer;transition:.15s;display:inline-block;}
+
+/* ════════════════════════════════════════════════════════
+   PROMO PAGE
+════════════════════════════════════════════════════════ */
+.promo-page{min-height:100vh;background:#0D1117;}
+.promo-header{padding:40px 24px 30px;text-align:center;position:relative;overflow:hidden;}
+.promo-header-bg{position:absolute;inset:0;z-index:0;}
+.promo-header-content{position:relative;z-index:1;}
+.promo-brand-name{font-size:12px;font-weight:800;letter-spacing:3px;text-transform:uppercase;color:rgba(255,255,255,.6);margin-bottom:14px;}
+.promo-badge{display:inline-block;padding:7px 20px;border-radius:50px;font-size:14px;font-weight:900;letter-spacing:.5px;background:rgba(255,255,255,.18);border:2px solid rgba(255,255,255,.35);color:#fff;margin-bottom:14px;}
+.promo-title{font-size:32px;font-weight:900;color:#fff;letter-spacing:-.8px;line-height:1.15;text-shadow:0 2px 16px rgba(0,0,0,.3);}
+.promo-body-wrap{padding:20px 20px 28px;max-width:520px;margin:0 auto;}
+.promo-desc{font-size:15px;color:rgba(255,255,255,.68);line-height:1.7;margin-bottom:20px;text-align:center;}
+.promo-img-wrap{border-radius:16px;overflow:hidden;margin-bottom:20px;border:1.5px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;height:130px;font-size:56px;}
+.promo-cta{display:block;width:100%;padding:18px;border-radius:14px;font-size:16px;font-weight:900;text-align:center;text-decoration:none;font-family:'Plus Jakarta Sans',sans-serif;border:none;cursor:pointer;transition:.18s;letter-spacing:-.2px;color:#fff;}
+.promo-cta:hover{transform:translateY(-3px);}
+.promo-cta:active{transform:translateY(0);}
+.promo-share{text-align:center;margin-top:18px;}
+.promo-share span{font-size:12px;color:rgba(255,255,255,.4);font-weight:600;}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loadState">
+  <div class="load-mark">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+      <rect x="1" y="1" width="8" height="8" rx="1.5" fill="white"/>
+      <rect x="3.5" y="3.5" width="3" height="3" fill="#F97316"/>
+      <rect x="15" y="1" width="8" height="8" rx="1.5" fill="white"/>
+      <rect x="17.5" y="3.5" width="3" height="3" fill="#F97316"/>
+      <rect x="1" y="15" width="8" height="8" rx="1.5" fill="white"/>
+      <rect x="3.5" y="17.5" width="3" height="3" fill="#F97316"/>
+    </svg>
+  </div>
+  <div class="load-text">Loading…</div>
+</div>
+
+<!-- Error -->
+<div id="errState">
+  <div style="font-size:56px;margin-bottom:16px;">🔍</div>
+  <h2>Page Not Found</h2>
+  <p>This page doesn't exist or hasn't been published yet.<br>Double-check the link and try again.</p>
+  <a href="/" style="display:inline-flex;align-items:center;gap:8px;padding:13px 26px;background:linear-gradient(135deg,#F97316,#EF4444);color:#fff;border-radius:12px;font-size:14px;font-weight:800;text-decoration:none;box-shadow:0 6px 20px rgba(249,115,22,.35);">Create your own page →</a>
+</div>
+
+<!-- Main -->
+<div id="mainPage"></div>
+
+<script>
+firebase.initializeApp({
+  apiKey:'AIzaSyCgaYVSaKtXAQOVRTRfAGV6cWjPqG9x4Tc',
+  authDomain:'trisend-e7250.firebaseapp.com',
+  projectId:'trisend-e7250',
+  storageBucket:'trisend-e7250.firebasestorage.app',
+  messagingSenderId:'1088068014414',
+  appId:'1:1088068014414:web:77c1f5c1de544b6ab5ce1f'
+});
+const db = firebase.firestore();
+
+const slug = window.location.pathname.split('/p/')[1]?.split('/')[0]?.toLowerCase();
+
+// ── Load page by slug ─────────────────────────────────────────────────────────
+async function loadPage() {
+  if (!slug) { showErr(); return; }
+  try {
+    // Query pages collection by slug field
+    const snap = await db.collection('pages').where('slug','==',slug).where('published','==',true).limit(1).get();
+    if (snap.empty) { showErr(); return; }
+    const doc  = snap.docs[0];
+    const page = doc.data();
+    renderPage(page, doc.id);
+    // Increment views
+    db.collection('pages').doc(doc.id).update({ views: firebase.firestore.FieldValue.increment(1) }).catch(()=>{});
+  } catch(e) { showErr(); }
+}
+
+function renderPage(page, id) {
+  const d = page.data || {};
+  const type = page.type;
+
+  // Meta
+  const metaTitle = d.displayName || d.name || d.brandName || d.promoTitle || 'Trisend Page';
+  document.title = metaTitle + ' · Trisend';
+  document.getElementById('ogTitle').content = metaTitle;
+  document.getElementById('ogDesc').content  = d.bio || d.tagline || d.promoDesc || 'Powered by Trisend';
+
+  const main = document.getElementById('mainPage');
+
+  if (type === 'linkinbio')    main.innerHTML = renderBioPage(d);
+  if (type === 'businesscard') main.innerHTML = renderCardPage(d);
+  if (type === 'products')     main.innerHTML = renderProductsPage(d);
+  if (type === 'promotions')   main.innerHTML = renderPromoPage(d);
+
+  document.getElementById('loadState').style.display = 'none';
+  document.getElementById('mainPage').style.display  = 'block';
+}
+
+// ════════════════════════════════════════════════════════
+//  BIO PAGE RENDERER
+// ════════════════════════════════════════════════════════
+function renderBioPage(d) {
+  const theme  = d.theme || 'orange';
+  const links  = (d.links||[]).filter(l=>l.title&&l.url);
+  const ls     = d.linkStyle || 'solid';
+  return `
+  <div class="bio-page bio-t-${theme}">
+    <div class="bio-hero">
+      <div class="bio-hero-bg"></div>
+      <div class="bio-hero-content">
+        <div class="bio-av">${h(d.emoji||'😊')}</div>
+        <div class="bio-name">${h(d.displayName||'')}</div>
+        ${d.bio?`<div class="bio-tagline">${h(d.bio)}</div>`:''}
+      </div>
+    </div>
+    <div class="bio-links-wrap">
+      ${links.map(l=>`
+        <a class="bio-link ls-${ls}" href="${safeUrl(l.url)}" target="_blank" rel="noopener noreferrer">
+          <div class="bl-ico" style="color:#fff;">${h(l.icon||'🔗')}</div>
+          <div class="bl-title">${h(l.title)}</div>
+          <div class="bl-arr"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg></div>
+        </a>`).join('')}
+      ${!links.length?`<div style="text-align:center;padding:32px;color:#94A3B8;font-size:14px;">No links yet.</div>`:''}
+    </div>
+    ${!d.hideBranding?poweredBy():''}
+  </div>`;
+}
+
+// ════════════════════════════════════════════════════════
+//  BUSINESS CARD RENDERER
+// ════════════════════════════════════════════════════════
+function renderCardPage(d) {
+  const isDark = d.cardBg === '#0F172A' || d.style === 'dark';
+  const bg   = d.cardBg || '#FFFFFF';
+  const textC = isDark ? '#FFFFFF' : '#0D1117';
+  const subC  = isDark ? 'rgba(255,255,255,.55)' : '#64748B';
+  const bdrC  = isDark ? 'rgba(255,255,255,.1)' : '#E4EAF2';
+  const iconBg = isDark ? 'rgba(255,255,255,.08)' : '#F1F5F9';
+  const grad  = isDark ? 'linear-gradient(135deg,#F59E0B,#EF4444)' : 'linear-gradient(135deg,#3B82F6,#06B6D4)';
+  const socials = d.socials || {};
+  const hasSoc = Object.values(socials).some(v=>v);
+
+  return `
+  <div class="card-page" style="background:${bg};min-height:100vh;">
+    <div class="card-cover"><div class="card-cover-grad" style="background:${grad};"></div></div>
+    <div class="card-body-wrap">
+      <div class="card-avatar" style="border-color:${bg};background:${iconBg};color:${textC};">💼</div>
+      <div class="card-name" style="color:${textC};">${h(d.name||'Your Name')}</div>
+      <div class="card-title" style="color:${subC};">${h(d.title||'')}</div>
+      <div class="card-company" style="color:${subC};">${h(d.company||'')}</div>
+      <div class="card-divider" style="background:${bdrC};"></div>
+      <div class="card-contacts">
+        ${d.phone?`<div class="card-contact-row"><div class="card-contact-icon" style="background:${iconBg};">📞</div><div class="card-contact-info"><div class="card-contact-label" style="color:${subC};">Phone</div><a class="card-contact-val" href="tel:${h(d.phone)}" style="color:${textC};">${h(d.phone)}</a></div></div>`:''}
+        ${d.email?`<div class="card-contact-row"><div class="card-contact-icon" style="background:${iconBg};">📧</div><div class="card-contact-info"><div class="card-contact-label" style="color:${subC};">Email</div><a class="card-contact-val" href="mailto:${h(d.email)}" style="color:${textC};">${h(d.email)}</a></div></div>`:''}
+        ${d.address?`<div class="card-contact-row"><div class="card-contact-icon" style="background:${iconBg};">📍</div><div class="card-contact-info"><div class="card-contact-label" style="color:${subC};">Address</div><div class="card-contact-val" style="color:${textC};">${h(d.address)}</div></div></div>`:''}
+        ${d.website?`<div class="card-contact-row"><div class="card-contact-icon" style="background:${iconBg};">🌐</div><div class="card-contact-info"><div class="card-contact-label" style="color:${subC};">Website</div><a class="card-contact-val" href="${safeUrl(d.website)}" target="_blank" rel="noopener" style="color:${textC};">${h(d.website)}</a></div></div>`:''}
+      </div>
+      ${hasSoc?`<div class="card-socials">
+        ${socials.linkedin?`<a class="card-soc-btn" href="https://linkedin.com/in/${h(socials.linkedin)}" target="_blank" rel="noopener" style="background:${iconBg};color:${textC};">💼 LinkedIn</a>`:''}
+        ${socials.instagram?`<a class="card-soc-btn" href="https://instagram.com/${h(socials.instagram.replace('@',''))}" target="_blank" rel="noopener" style="background:${iconBg};color:${textC};">📸 Instagram</a>`:''}
+        ${socials.twitter?`<a class="card-soc-btn" href="https://twitter.com/${h(socials.twitter.replace('@',''))}" target="_blank" rel="noopener" style="background:${iconBg};color:${textC};">🐦 Twitter</a>`:''}
+        ${socials.whatsapp?`<a class="card-soc-btn" href="https://wa.me/${h(socials.whatsapp.replace(/\D/g,''))}" target="_blank" rel="noopener" style="background:${iconBg};color:${textC};">💬 WhatsApp</a>`:''}
+      </div>`:''}
+      <button class="save-btn" onclick="saveContact('${h(JSON.stringify(d).replace(/'/g,"\\'"))}');" style="background:${grad};color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.15);">
+        ⬇️ Save Contact
+      </button>
+    </div>
+    ${poweredBy()}
+  </div>`;
+}
+
+function saveContact(raw) {
+  try {
+    const d = JSON.parse(raw);
+    const vcard = [
+      'BEGIN:VCARD','VERSION:3.0',
+      `FN:${d.name||''}`,
+      d.title?`TITLE:${d.title}`:'',
+      d.company?`ORG:${d.company}`:'',
+      d.phone?`TEL;TYPE=CELL:${d.phone}`:'',
+      d.email?`EMAIL:${d.email}`:'',
+      d.address?`ADR:;;${d.address};;;;`:'',
+      d.website?`URL:${d.website}`:'',
+      'END:VCARD'
+    ].filter(Boolean).join('\r\n');
+    const blob = new Blob([vcard], { type:'text/vcard' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = (d.name||'contact').replace(/\s+/g,'_') + '.vcf';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) {}
+}
+
+// ════════════════════════════════════════════════════════
+//  PRODUCTS RENDERER
+// ════════════════════════════════════════════════════════
+function renderProductsPage(d) {
+  const accent   = d.accentColor || '#8B5CF6';
+  const products = (d.products||[]).filter(p=>p.name);
+  const isCatalog = (d.style||'catalog') === 'catalog';
+  const lightenAccent = accent + '22';
+  return `
+  <div class="products-page">
+    <div class="products-header">
+      <div class="prod-header-bg" style="background:${accent};"></div>
+      <div class="prod-header-content">
+        <div class="prod-brand-icon">${h(d.emoji||'🛍️')}</div>
+        <div class="prod-brand-name">${h(d.brandName||'My Store')}</div>
+        ${d.tagline?`<div class="prod-tagline">${h(d.tagline)}</div>`:''}
+      </div>
+    </div>
+    <div class="products-grid-wrap">
+      ${isCatalog ? `
+      <div class="products-grid">
+        ${products.map(p=>`
+          <div class="product-card">
+            <div class="product-img" style="background:${lightenAccent};">${p.emoji||'🏷️'}</div>
+            <div class="product-info">
+              <div class="product-name">${h(p.name)}</div>
+              ${p.desc?`<div class="product-desc">${h(p.desc)}</div>`:''}
+              ${p.price?`<div class="product-price" style="color:${accent};">${h(p.price)}</div>`:''}
+              ${p.link?`<a class="product-cta-btn" href="${safeUrl(p.link)}" target="_blank" rel="noopener" style="background:${accent};color:#fff;">${h(d.ctaText||'Buy Now')}</a>`:`<div class="product-cta-btn" style="background:${accent};color:#fff;">${h(d.ctaText||'Buy Now')}</div>`}
+            </div>
+          </div>`).join('')}
+        ${!products.length?`<div style="grid-column:span 2;text-align:center;padding:40px;color:#94A3B8;font-size:14px;">No products listed yet.</div>`:''}
+      </div>` : `
+      <div class="products-list">
+        ${products.map(p=>`
+          <div class="product-list-card">
+            <div class="product-list-img" style="background:${lightenAccent};">${p.emoji||'🏷️'}</div>
+            <div class="product-list-body">
+              <div class="product-list-name">${h(p.name)}</div>
+              ${p.desc?`<div class="product-list-desc">${h(p.desc)}</div>`:''}
+              <div class="product-list-foot">
+                ${p.price?`<div class="product-list-price" style="color:${accent};">${h(p.price)}</div>`:'<div></div>'}
+                ${p.link?`<a class="product-list-btn" href="${safeUrl(p.link)}" target="_blank" rel="noopener" style="background:${accent};color:#fff;">${h(d.ctaText||'Buy')}</a>`:`<span class="product-list-btn" style="background:${lightenAccent};color:${accent};">${h(d.ctaText||'Buy')}</span>`}
+              </div>
+            </div>
+          </div>`).join('')}
+        ${!products.length?`<div style="text-align:center;padding:40px;color:#94A3B8;font-size:14px;">No products listed yet.</div>`:''}
+      </div>`}
+    </div>
+    ${poweredBy()}
+  </div>`;
+}
+
+// ════════════════════════════════════════════════════════
+//  PROMO RENDERER
+// ════════════════════════════════════════════════════════
+function renderPromoPage(d) {
+  const accent = d.accentColor || '#F97316';
+  return `
+  <div class="promo-page">
+    <div class="promo-header">
+      <div class="promo-header-bg" style="background:linear-gradient(160deg,${accent} 0%,${accent}88 100%);"></div>
+      <div class="promo-header-content">
+        ${d.brandName?`<div class="promo-brand-name">${h(d.brandName)}</div>`:''}
+        ${d.badge?`<div class="promo-badge">${h(d.badge)}</div>`:''}
+        <div class="promo-title">${h(d.promoTitle||'Special Offer')}</div>
+      </div>
+    </div>
+    <div class="promo-body-wrap">
+      ${d.promoDesc?`<div class="promo-desc">${h(d.promoDesc)}</div>`:''}
+      <div class="promo-img-wrap">🎁</div>
+      ${d.ctaUrl?
+        `<a class="promo-cta" href="${safeUrl(d.ctaUrl)}" target="_blank" rel="noopener" style="background:linear-gradient(135deg,${accent},${accent}cc);box-shadow:0 8px 28px ${accent}66;">${h(d.ctaText||'Shop Now')} →</a>` :
+        `<div class="promo-cta" style="background:linear-gradient(135deg,${accent},${accent}cc);box-shadow:0 8px 28px ${accent}66;cursor:default;">${h(d.ctaText||'Shop Now')} →</div>`
+      }
+      <div class="promo-share">
+        <span>Powered by</span>
+        <a href="/" style="color:rgba(255,255,255,.5);font-size:12px;font-weight:700;margin-left:5px;text-decoration:none;">Trisend</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Powered by badge ──────────────────────────────────────────────────────────
+function poweredBy() {
+  return `<div class="powered-bar">
+    <a href="/">
+      <span class="pw-mark"><svg width="9" height="9" viewBox="0 0 24 24" fill="none"><rect x="1" y="1" width="8" height="8" rx="1.5" fill="white"/><rect x="15" y="1" width="8" height="8" rx="1.5" fill="white"/><rect x="1" y="15" width="8" height="8" rx="1.5" fill="white"/></svg></span>
+      Made with Trisend
+    </a>
+  </div>`;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function h(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function safeUrl(s){ try{ return new URL(s).href; }catch{ return s.startsWith('http')?s:'https://'+s; } }
+function showErr(){ document.getElementById('loadState').style.display='none'; document.getElementById('errState').style.display='flex'; }
+
+loadPage();
+</script>
+</body>
+</html>
